@@ -2,7 +2,7 @@ import Dexie, { type Table } from 'dexie'
 
 export interface LocalFeeding {
   id?: number
-  serverId?: string | null
+  clientId: string
   startedAt: Date
   endedAt: Date
   side: 'left' | 'right'
@@ -19,6 +19,18 @@ class LatchDB extends Dexie {
     this.version(1).stores({
       feedings: '++id, startedAt, synced',
     })
+    this.version(2)
+      .stores({
+        feedings: '++id, startedAt, synced, clientId',
+      })
+      .upgrade(async (tx) => {
+        await tx
+          .table<LocalFeeding>('feedings')
+          .toCollection()
+          .modify((f) => {
+            if (!f.clientId) f.clientId = crypto.randomUUID()
+          })
+      })
   }
 }
 

@@ -3,6 +3,14 @@
 import { useEffect, useState } from 'react'
 import { useNightMode } from '@/lib/hooks/useNightMode'
 import { db } from '@/lib/db'
+import { syncPendingFeedings } from '@/lib/sync'
+import { createClient } from '@/lib/supabase/client'
+
+interface Checkin {
+  id: string
+  message: string
+  read_at: string | null
+}
 
 type FeedingState = 'idle' | 'active' | 'done'
 type Side = 'left' | 'right'
@@ -17,6 +25,7 @@ export default function Home() {
   const [elapsed, setElapsed] = useState(0)
   const [mood, setMood] = useState<string | null>(null)
   const [note, setNote] = useState('')
+  const [checkin, setCheckin] = useState<Checkin | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -26,10 +35,36 @@ export default function Home() {
         setSuggestedSide(last.side === 'left' ? 'right' : 'left')
       }
     })()
+    void syncPendingFeedings()
+    void (async () => {
+      const supabase = createClient()
+      const today = new Date().toISOString().slice(0, 10)
+      const { data } = await supabase
+        .from('morning_checkins')
+        .select('id, message, read_at')
+        .eq('for_date', today)
+        .maybeSingle()
+      if (!cancelled && data) setCheckin(data)
+    })()
+    const onOnline = () => {
+      void syncPendingFeedings()
+    }
+    window.addEventListener('online', onOnline)
     return () => {
       cancelled = true
+      window.removeEventListener('online', onOnline)
     }
   }, [])
+
+  async function dismissCheckin() {
+    if (!checkin) return
+    const supabase = createClient()
+    await supabase
+      .from('morning_checkins')
+      .update({ read_at: new Date().toISOString() })
+      .eq('id', checkin.id)
+    setCheckin(null)
+  }
 
   useEffect(() => {
     if (state !== 'active' || !startedAt) return
@@ -54,6 +89,7 @@ export default function Home() {
   async function persistAndReset(withMood: boolean) {
     if (!startedAt || !endedAt) return
     await db.feedings.add({
+      clientId: crypto.randomUUID(),
       startedAt,
       endedAt,
       side,
@@ -61,6 +97,7 @@ export default function Home() {
       note: withMood ? note.trim() : '',
       synced: false,
     })
+    void syncPendingFeedings()
     setSuggestedSide(side === 'left' ? 'right' : 'left')
     setStartedAt(null)
     setEndedAt(null)
@@ -71,14 +108,55 @@ export default function Home() {
   }
 
   if (state === 'idle') {
+    const showCheckin = checkin && !checkin.read_at
     return (
       <main
         className={`min-h-screen flex flex-col ${
           night ? 'bg-black text-[#8B0000]' : 'bg-white text-neutral-900'
         }`}
       >
+        {showCheckin && (
+          <div className="px-6 pt-6">
+            <div
+              className={`rounded-2xl p-5 ${
+                night
+                  ? 'border border-[#8B0000]/40 bg-black'
+                  : 'bg-neutral-100'
+              }`}
+            >
+              <div
+                className={`text-xs uppercase tracking-wide mb-2 ${
+                  night ? 'text-[#8B0000]/60' : 'text-neutral-500'
+                }`}
+              >
+                Bonjour
+              </div>
+              <p className="text-base leading-relaxed mb-4">
+                {checkin.message}
+              </p>
+              <div className="flex items-center justify-between gap-3">
+                <span
+                  className={`text-xs italic ${
+                    night ? 'text-[#8B0000]/50' : 'text-neutral-400'
+                  }`}
+                >
+                  Ces messages ne remplacent pas l&apos;avis d&apos;un
+                  professionnel de santé.
+                </span>
+                <button
+                  onClick={dismissCheckin}
+                  className={`text-sm underline underline-offset-2 shrink-0 ${
+                    night ? 'text-[#8B0000]/80' : 'text-neutral-600'
+                  }`}
+                >
+                  Lu
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
         <div
-          className={`px-6 pt-8 text-sm ${
+          className={`px-6 pt-6 text-sm ${
             night ? 'text-[#8B0000]/70' : 'text-neutral-500'
           }`}
         >

@@ -2,17 +2,32 @@
 
 import { useState } from 'react'
 import { useNightMode } from '@/lib/hooks/useNightMode'
+import { createClient } from '@/lib/supabase/client'
 
 export default function Login() {
   const night = useNightMode()
   const [email, setEmail] = useState('')
   const [sent, setSent] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    // TODO C3: supabase.auth.signInWithOtp({ email })
-    console.log('magic link requested for', email)
-    setSent(true)
+    setError(null)
+    setLoading(true)
+    const supabase = createClient()
+    const { error: err } = await supabase.auth.signInWithOtp({
+      email,
+      options: {
+        emailRedirectTo: `${window.location.origin}/auth/callback`,
+      },
+    })
+    setLoading(false)
+    if (err) {
+      setError(err.message)
+    } else {
+      setSent(true)
+    }
   }
 
   return (
@@ -48,7 +63,8 @@ export default function Login() {
               onChange={(e) => setEmail(e.target.value)}
               placeholder="ton@email.com"
               autoComplete="email"
-              className={`rounded-2xl border p-4 text-base focus:outline-none focus:ring-2 ${
+              disabled={loading}
+              className={`rounded-2xl border p-4 text-base focus:outline-none focus:ring-2 disabled:opacity-50 ${
                 night
                   ? 'bg-black border-[#8B0000]/40 text-[#8B0000] placeholder-[#8B0000]/40 focus:ring-[#8B0000]'
                   : 'border-neutral-200 focus:ring-neutral-900'
@@ -56,14 +72,24 @@ export default function Login() {
             />
             <button
               type="submit"
-              className={`rounded-2xl py-4 text-lg font-medium transition-colors ${
+              disabled={loading}
+              className={`rounded-2xl py-4 text-lg font-medium transition-colors disabled:opacity-50 ${
                 night
                   ? 'border-2 border-[#8B0000] text-[#8B0000] active:bg-[#8B0000]/10'
                   : 'bg-neutral-900 text-white active:bg-neutral-700'
               }`}
             >
-              Recevoir un lien
+              {loading ? 'Envoi…' : 'Recevoir un lien'}
             </button>
+            {error && (
+              <div
+                className={`text-sm ${
+                  night ? 'text-[#8B0000]/80' : 'text-red-700'
+                }`}
+              >
+                {error}
+              </div>
+            )}
           </form>
         )}
       </div>
