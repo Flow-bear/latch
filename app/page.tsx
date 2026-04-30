@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useNightMode } from '@/lib/hooks/useNightMode'
+import { db } from '@/lib/db'
 
 type FeedingState = 'idle' | 'active' | 'done'
 type Side = 'left' | 'right'
@@ -12,9 +13,23 @@ export default function Home() {
   const [suggestedSide, setSuggestedSide] = useState<Side>('right')
   const [side, setSide] = useState<Side>('right')
   const [startedAt, setStartedAt] = useState<Date | null>(null)
+  const [endedAt, setEndedAt] = useState<Date | null>(null)
   const [elapsed, setElapsed] = useState(0)
   const [mood, setMood] = useState<string | null>(null)
   const [note, setNote] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      const last = await db.feedings.orderBy('startedAt').reverse().first()
+      if (!cancelled && last) {
+        setSuggestedSide(last.side === 'left' ? 'right' : 'left')
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     if (state !== 'active' || !startedAt) return
@@ -32,21 +47,23 @@ export default function Home() {
   }
 
   function stopFeeding() {
+    setEndedAt(new Date())
     setState('done')
   }
 
-  function persistAndReset(withMood: boolean) {
-    // TODO B2: persist to Dexie
-    console.log('feeding saved', {
-      side,
+  async function persistAndReset(withMood: boolean) {
+    if (!startedAt || !endedAt) return
+    await db.feedings.add({
       startedAt,
-      endedAt: new Date(),
-      durationSec: elapsed,
+      endedAt,
+      side,
       mood: withMood ? mood : null,
-      note: withMood ? note : '',
+      note: withMood ? note.trim() : '',
+      synced: false,
     })
     setSuggestedSide(side === 'left' ? 'right' : 'left')
     setStartedAt(null)
+    setEndedAt(null)
     setElapsed(0)
     setMood(null)
     setNote('')
