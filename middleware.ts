@@ -7,6 +7,8 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|icon-.*\\.png|manifest.json|sw.js|workbox-.*\\.js|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    // API routes handle their own auth (e.g., /api/checkin uses CRON_SECRET).
+    // Static assets and PWA files don't need session refresh.
+    '/((?!api/|_next/static|_next/image|favicon.ico|icon-.*\\.png|manifest.json|sw.js|workbox-.*\\.js|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 }
