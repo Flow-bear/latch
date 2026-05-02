@@ -40,3 +40,6 @@ public/workbox-*.js.map
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# supabase CLI working directory
+supabase/.temp/
