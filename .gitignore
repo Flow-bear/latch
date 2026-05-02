@@ -43,3 +43,6 @@ next-env.d.ts
 
 # supabase CLI working directory
 supabase/.temp/
+
+# test screenshots (regenerated on each test run)
+scripts/test-screens/
