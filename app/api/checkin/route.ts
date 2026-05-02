@@ -12,20 +12,6 @@ const supabaseAdmin = createClient(
 
 const anthropic = new Anthropic()
 
-interface Profile {
-  id: string
-  timezone: string
-}
-
-function localHourFor(now: Date, timezone: string): number {
-  const fmt = new Intl.DateTimeFormat('en-US', {
-    timeZone: timezone,
-    hour: 'numeric',
-    hour12: false,
-  })
-  return parseInt(fmt.format(now), 10)
-}
-
 function localDateFor(now: Date, timezone: string): string {
   const fmt = new Intl.DateTimeFormat('en-CA', {
     timeZone: timezone,
@@ -52,8 +38,10 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: profilesErr.message }, { status: 500 })
   }
 
-  const targets =
-    profiles?.filter((p: Profile) => localHourFor(now, p.timezone) === 9) ?? []
+  // Vercel Hobby caps at 1 cron/day. We process every profile on each firing
+  // and rely on the unique (user_id, for_date) constraint for idempotency.
+  // When upgrading to Pro, restore: filter((p) => localHourFor(now, p.timezone) === 9)
+  const targets = profiles ?? []
 
   let generated = 0
   for (const profile of targets) {

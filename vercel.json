@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/api/checkin",
-      "schedule": "0 * * * *"
+      "schedule": "0 8 * * *"
     }
   ]
 }
