@@ -310,11 +310,22 @@ Trois scripts complémentaires dans `scripts/`, lancés à la main avec `node sc
 | `e2e-feeding.mjs` | OTP admin, verifyOtp REST, upsert authentifié, RLS | 10/10 ✅ |
 | `e2e-browser.mjs` | UI authentifiée full Playwright (cookie injection), state machine, sync IndexedDB → Supabase | 15/15 ✅ + screenshots `b1-idle.png` à `b4-mood.png` |
 
-`visual-preview.mjs` lance un `next start` local et prend 4 screenshots (idle/login × jour/nuit) — utile avant chaque redesign.
+`visual-preview.mjs` build un prod local sur port 4101, monte une vraie session via OTP admin, et prend 7 screenshots dans `scripts/test-screens/preview-*.png` :
+- `day-checkin-open` / `night-checkin-open` — carte BONJOUR dépliée (Supabase `morning_checkins` mocké via `page.route()`)
+- `day-checkin-collapsed` / `night-checkin-collapsed` — bande compacte (localStorage `latch:checkin-collapsed:<date>` pré-set via `addInitScript`)
+- `day-no-checkin` — sans carte (mock renvoie 406 PGRST116)
+- `day-login` / `night-login` — page publique
+
+Workflow : `npm run build && node scripts/visual-preview.mjs`. Lancer **toujours** après chaque modif d'`app/page.tsx` pour valider le rendu sans avoir à se connecter manuellement.
+
+**Gotchas** (causes de screenshots vides ou stale, déjà fixés mais à savoir) :
+- Le `next start` est spawn avec `shell: true` → sur Windows, `server.kill()` ne tue que le wrapper. Le node enfant survit, garde le port 4101, et sert l'**ancien** build au prochain run. Le script utilise `taskkill /F /T /PID` pour tuer l'arbre, et refuse de démarrer si 4101 est déjà occupé.
+- `next-pwa` enregistre un service worker qui peut servir des chunks périmés. Le script crée le contexte Playwright avec `serviceWorkers: 'block'`.
+- Toujours rebuild (`npm run build`) avant de relancer — sinon `next start` sert un build dont les chunks ne correspondent plus à `app/page.tsx` et la page ne hydrate pas.
 
 Total **34/34** sur les 3 dimensions critiques.
 
-**Cookie injection trick** (`e2e-browser.mjs`) : on évite la livraison d'email en mintant la session via admin + verifyOtp REST, puis en construisant le cookie SSR au format `base64-<base64url(session)>` (chunké si besoin via `createChunks` de `@supabase/ssr/dist/main/utils/chunker.js`).
+**Cookie injection trick** (`e2e-browser.mjs` + `visual-preview.mjs`) : on évite la livraison d'email en mintant la session via admin + verifyOtp REST, puis en construisant le cookie SSR au format `base64-<base64url(session)>` (chunké si besoin via `createChunks` de `@supabase/ssr/dist/main/utils/chunker.js`).
 
 ## PWA
 

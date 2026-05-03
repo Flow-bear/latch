@@ -26,6 +26,7 @@ export default function Home() {
   const [mood, setMood] = useState<string | null>(null)
   const [note, setNote] = useState('')
   const [checkin, setCheckin] = useState<Checkin | null>(null)
+  const [checkinCollapsed, setCheckinCollapsed] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -44,7 +45,12 @@ export default function Home() {
         .select('id, message, read_at')
         .eq('for_date', today)
         .maybeSingle()
-      if (!cancelled && data) setCheckin(data)
+      if (!cancelled && data) {
+        setCheckin(data)
+        if (localStorage.getItem(`latch:checkin-collapsed:${today}`)) {
+          setCheckinCollapsed(true)
+        }
+      }
     })()
     const onOnline = () => {
       void syncPendingFeedings()
@@ -64,14 +70,22 @@ export default function Home() {
     return () => clearInterval(id)
   }, [state, startedAt])
 
-  async function dismissCheckin() {
+  async function markCheckinRead() {
     if (!checkin) return
+    const today = new Date().toISOString().slice(0, 10)
+    localStorage.setItem(`latch:checkin-collapsed:${today}`, '1')
+    setCheckinCollapsed(true)
     const supabase = createClient()
     await supabase
       .from('morning_checkins')
       .update({ read_at: new Date().toISOString() })
       .eq('id', checkin.id)
-    setCheckin(null)
+  }
+
+  function expandCheckin() {
+    const today = new Date().toISOString().slice(0, 10)
+    localStorage.removeItem(`latch:checkin-collapsed:${today}`)
+    setCheckinCollapsed(false)
   }
 
   function startFeeding() {
@@ -148,7 +162,6 @@ export default function Home() {
 
   // ─── IDLE ────────────────────────────────────────────────────────────────
   if (state === 'idle') {
-    const showCheckin = checkin && !checkin.read_at
     return (
       <main className={`min-h-screen flex flex-col ${c.bg} ${c.text}`}>
         <header className="px-6 pt-6 pb-2 flex items-center justify-between">
@@ -159,7 +172,7 @@ export default function Home() {
           </h1>
         </header>
 
-        {showCheckin && (
+        {checkin && !checkinCollapsed && (
           <div className="px-6 mt-4">
             <div className={`rounded-3xl p-5 border ${c.cardBg} ${c.cardBorder}`}>
               <div className={`text-xs tracking-[0.2em] uppercase mb-2 ${c.muted}`}>
@@ -172,7 +185,7 @@ export default function Home() {
                   professionnel de santé.
                 </span>
                 <button
-                  onClick={dismissCheckin}
+                  onClick={markCheckinRead}
                   className={`text-xs underline underline-offset-2 shrink-0 ${c.soft}`}
                 >
                   Lu
@@ -182,9 +195,40 @@ export default function Home() {
           </div>
         )}
 
-        <div className="flex-1 flex flex-col items-center justify-center gap-8 px-6">
-          <div className={`text-xs tracking-[0.32em] uppercase ${c.muted}`}>
-            Côté&nbsp;·&nbsp;{labelSide(suggestedSide)}
+        {checkin && checkinCollapsed && (
+          <div className="px-6 mt-4">
+            <button
+              onClick={expandCheckin}
+              aria-label="Rouvrir le check-in du matin"
+              className={`w-full flex items-center justify-between rounded-full px-5 py-3 border ${c.cardBg} ${c.cardBorder} ${c.soft}`}
+            >
+              <span className="text-xs tracking-[0.2em] uppercase">
+                ✓ Check-in du matin lu
+              </span>
+              <span aria-hidden className="text-base leading-none">⌄</span>
+            </button>
+          </div>
+        )}
+
+        <div className="flex-1 flex flex-col items-center justify-center gap-6 px-6">
+          <div className="flex gap-3 w-60">
+            {(['left', 'right'] as const).map((s) => {
+              const active = suggestedSide === s
+              return (
+                <button
+                  key={s}
+                  onClick={() => setSuggestedSide(s)}
+                  aria-pressed={active}
+                  className={`flex-1 rounded-full py-3 text-sm font-light tracking-[0.2em] uppercase border-2 transition-colors ${
+                    active
+                      ? `${c.accent} ${c.accentText} border-transparent`
+                      : `${c.ringStrong} ${c.text} ${c.hoverFill}`
+                  }`}
+                >
+                  {labelSide(s)}
+                </button>
+              )
+            })}
           </div>
 
           <button
@@ -193,15 +237,6 @@ export default function Home() {
             className={`w-60 h-60 rounded-full border-2 flex items-center justify-center text-2xl font-light tracking-wide transition-colors ${c.ringStrong} ${c.text} ${c.hoverFill}`}
           >
             Démarrer
-          </button>
-
-          <button
-            onClick={() =>
-              setSuggestedSide(suggestedSide === 'left' ? 'right' : 'left')
-            }
-            className={`text-xs underline underline-offset-4 ${c.muted}`}
-          >
-            Changer de côté
           </button>
         </div>
 
