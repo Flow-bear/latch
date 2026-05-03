@@ -2,13 +2,30 @@
 -- Run this once in the Supabase SQL Editor.
 
 -- ─── 1. profiles (extends auth.users) ─────────────────────────────────────
+-- Onboarding-collected fields are nullable on the table because the trigger
+-- inserts an empty row at signup. The wizard fills them and sets onboarded_at;
+-- the middleware uses onboarded_at IS NOT NULL as the gate.
 create table public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   baby_name text,
   baby_birth_date date,
   timezone text not null default 'Europe/Paris',
-  created_at timestamptz not null default now()
+  is_first_child boolean,
+  feeding_type text check (feeding_type in ('exclusive', 'mixed')),
+  breastfeeding_start_date date,
+  current_rhythm text check (current_rhythm in
+    ('very_close', 'regular', 'spaced', 'very_variable', 'just_started')),
+  has_professional_support boolean default false,
+  general_feeling text check (general_feeling is null or char_length(general_feeling) <= 500),
+  current_concern text check (current_concern is null or char_length(current_concern) <= 500),
+  onboarded_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz default now()
 );
+
+create index profiles_onboarded_idx
+  on public.profiles (id)
+  where onboarded_at is not null;
 
 alter table public.profiles enable row level security;
 
@@ -35,6 +52,42 @@ $$;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
+
+-- updated_at auto-bump
+create function public.touch_profiles_updated_at()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.updated_at := now();
+  return new;
+end;
+$$;
+
+create trigger profiles_touch_updated_at
+  before update on public.profiles
+  for each row execute function public.touch_profiles_updated_at();
+
+-- ─── 1bis. user_onboarding_progress ───────────────────────────────────────
+-- Ephemeral table: stores partial wizard state so an abandoned session can resume.
+-- Deleted at the end of the wizard.
+create table public.user_onboarding_progress (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  current_step smallint not null default 1,
+  partial_data jsonb not null default '{}'::jsonb,
+  updated_at timestamptz not null default now()
+);
+
+alter table public.user_onboarding_progress enable row level security;
+
+create policy "onboarding_progress_select_own"
+  on public.user_onboarding_progress for select using (auth.uid() = user_id);
+create policy "onboarding_progress_insert_own"
+  on public.user_onboarding_progress for insert with check (auth.uid() = user_id);
+create policy "onboarding_progress_update_own"
+  on public.user_onboarding_progress for update using (auth.uid() = user_id);
+create policy "onboarding_progress_delete_own"
+  on public.user_onboarding_progress for delete using (auth.uid() = user_id);
 
 -- ─── 2. feedings ──────────────────────────────────────────────────────────
 create table public.feedings (

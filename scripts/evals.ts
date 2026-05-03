@@ -10,12 +10,37 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk'
-import { MORNING_CHECKIN_SYSTEM, ASK_QUESTION_SYSTEM } from '../lib/prompts'
+import { ASK_QUESTION_SYSTEM, buildMorningCheckinSystem } from '../lib/prompts'
+import type { Profile } from '../lib/profile'
 import {
   formatFeedings24h,
   summary7d,
   type FeedingRow,
 } from '../lib/feeding-stats'
+
+// Representative profile used for every check-in eval case. The eval set tests
+// prompt behavior against feeding patterns; per-profile variations are out of
+// scope here. Override per-case if a fixture needs e.g. first-child=false.
+const DEFAULT_EVAL_PROFILE: Profile = {
+  id: '00000000-0000-0000-0000-000000000000',
+  baby_name: null,
+  baby_birth_date: new Date(Date.now() - 60 * 86_400_000)
+    .toISOString()
+    .slice(0, 10),
+  timezone: 'Europe/Paris',
+  is_first_child: true,
+  feeding_type: 'exclusive',
+  breastfeeding_start_date: new Date(Date.now() - 60 * 86_400_000)
+    .toISOString()
+    .slice(0, 10),
+  current_rhythm: 'regular',
+  has_professional_support: false,
+  general_feeling: null,
+  current_concern: null,
+  onboarded_at: new Date().toISOString(),
+  created_at: new Date().toISOString(),
+  updated_at: new Date().toISOString(),
+}
 
 const anthropic = new Anthropic()
 const TZ = 'Europe/Paris'
@@ -176,7 +201,7 @@ async function runCheckin(c: CheckinCase): Promise<string> {
   const response = await anthropic.messages.create({
     model: 'claude-sonnet-4-5',
     max_tokens: 256,
-    system: MORNING_CHECKIN_SYSTEM,
+    system: buildMorningCheckinSystem(DEFAULT_EVAL_PROFILE),
     messages: [
       {
         role: 'user',

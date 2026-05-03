@@ -30,12 +30,34 @@ export async function updateSession(request: NextRequest) {
   } = await supabase.auth.getUser()
 
   const path = request.nextUrl.pathname
-  const isPublic =
-    path.startsWith('/login') || path.startsWith('/auth')
+  const isPublic = path.startsWith('/login') || path.startsWith('/auth')
+  const isOnboarding = path.startsWith('/onboarding')
 
-  if (!user && !isPublic) {
+  if (!user) {
+    if (isPublic) return supabaseResponse
     const url = request.nextUrl.clone()
     url.pathname = '/login'
+    return NextResponse.redirect(url)
+  }
+
+  // Authenticated. Check onboarding status — single PK lookup, partial index.
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('onboarded_at')
+    .eq('id', user.id)
+    .maybeSingle()
+
+  const onboarded = !!profile?.onboarded_at
+
+  if (!onboarded && !isOnboarding && !isPublic) {
+    const url = request.nextUrl.clone()
+    url.pathname = '/onboarding'
+    return NextResponse.redirect(url)
+  }
+
+  if (onboarded && isOnboarding) {
+    const url = request.nextUrl.clone()
+    url.pathname = '/'
     return NextResponse.redirect(url)
   }
 

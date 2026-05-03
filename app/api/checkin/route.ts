@@ -1,7 +1,8 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
-import { MORNING_CHECKIN_SYSTEM } from '@/lib/prompts'
+import { buildMorningCheckinSystem } from '@/lib/prompts'
+import { PROFILE_COLUMNS, type Profile } from '@/lib/profile'
 import { formatFeedings24h, summary7d, type FeedingRow } from '@/lib/feeding-stats'
 
 const supabaseAdmin = createClient(
@@ -32,16 +33,18 @@ export async function GET(request: Request) {
 
   const { data: profiles, error: profilesErr } = await supabaseAdmin
     .from('profiles')
-    .select('id, timezone')
+    .select(PROFILE_COLUMNS)
+    .not('onboarded_at', 'is', null)
 
   if (profilesErr) {
     return NextResponse.json({ error: profilesErr.message }, { status: 500 })
   }
 
-  // Vercel Hobby caps at 1 cron/day. We process every profile on each firing
-  // and rely on the unique (user_id, for_date) constraint for idempotency.
-  // When upgrading to Pro, restore: filter((p) => localHourFor(now, p.timezone) === 9)
-  const targets = profiles ?? []
+  // Vercel Hobby caps at 1 cron/day. We process every onboarded profile on
+  // each firing and rely on the unique (user_id, for_date) constraint for
+  // idempotency. When upgrading to Pro, restore:
+  // filter((p) => localHourFor(now, p.timezone) === 9)
+  const targets = (profiles ?? []) as Profile[]
 
   let generated = 0
   for (const profile of targets) {
@@ -80,7 +83,7 @@ export async function GET(request: Request) {
       const response = await anthropic.messages.create({
         model: 'claude-sonnet-4-5',
         max_tokens: 256,
-        system: MORNING_CHECKIN_SYSTEM,
+        system: buildMorningCheckinSystem(profile),
         messages: [
           {
             role: 'user',

@@ -100,10 +100,69 @@ const MOCK_CHECKIN = {
   read_at: null,
 }
 
+// ─── Helpers to drive onboarding state via service_role ─────────────────
+const TEST_USER_ID = session.user.id
+
+const ONBOARDED_FIXTURE = {
+  baby_name: 'Lou',
+  baby_birth_date: '2026-02-15',
+  is_first_child: true,
+  feeding_type: 'exclusive',
+  breastfeeding_start_date: '2026-02-15',
+  current_rhythm: 'regular',
+  has_professional_support: false,
+  general_feeling: null,
+  current_concern: null,
+}
+
+async function setOnboarded(onboarded) {
+  if (onboarded) {
+    await admin
+      .from('profiles')
+      .update({ ...ONBOARDED_FIXTURE, onboarded_at: new Date().toISOString() })
+      .eq('id', TEST_USER_ID)
+  } else {
+    await admin
+      .from('profiles')
+      .update({
+        onboarded_at: null,
+        is_first_child: null,
+        feeding_type: null,
+        breastfeeding_start_date: null,
+        current_rhythm: null,
+        has_professional_support: false,
+        general_feeling: null,
+        current_concern: null,
+      })
+      .eq('id', TEST_USER_ID)
+  }
+}
+
+async function setOnboardingProgress(currentStep, partialData) {
+  await admin
+    .from('user_onboarding_progress')
+    .upsert(
+      {
+        user_id: TEST_USER_ID,
+        current_step: currentStep,
+        partial_data: partialData ?? {},
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'user_id' }
+    )
+}
+
+async function clearOnboardingProgress() {
+  await admin
+    .from('user_onboarding_progress')
+    .delete()
+    .eq('user_id', TEST_USER_ID)
+}
+
 /**
  * @param {string} label  filename suffix
  * @param {number} hour   forced hour (drives day/night mode via Date.getHours)
- * @param {{checkin?: 'open' | 'collapsed' | 'none'}} opts
+ * @param {{checkin?: 'open' | 'collapsed' | 'none', path?: string}} opts
  */
 async function shoot(label, hour, opts = {}) {
   const context = await browser.newContext({
@@ -176,7 +235,8 @@ async function shoot(label, hour, opts = {}) {
     errors.push(`[reqfail] ${r.url()} → ${r.failure()?.errorText}`)
   )
 
-  const resp = await page.goto(BASE, { waitUntil: 'networkidle', timeout: 15000 })
+  const target = `${BASE}${opts.path ?? '/'}`
+  const resp = await page.goto(target, { waitUntil: 'networkidle', timeout: 15000 })
   await page.waitForTimeout(1200)
   const finalUrl = page.url()
   const bodyText = (await page.locator('body').textContent())?.slice(0, 120) ?? ''
@@ -189,13 +249,56 @@ async function shoot(label, hour, opts = {}) {
 }
 
 try {
+  // ─── Onboarding shoots: clear onboarded_at first ───────────────────────
+  console.log('→ setting test user as NOT onboarded')
+  await setOnboarded(false)
+
+  // Step 1 (clean state)
+  await clearOnboardingProgress()
+  await shoot('day-onboarding-step1', 14, { path: '/onboarding' })
+  await shoot('night-onboarding-step1', 23, { path: '/onboarding' })
+
+  // Step 5 (mid-progress with several fields filled)
+  await setOnboardingProgress(5, {
+    baby_birth_date: '2026-02-15',
+    is_first_child: true,
+    feeding_type: 'exclusive',
+    breastfeeding_start_date: '2026-02-15',
+  })
+  await shoot('day-onboarding-step5', 14, { path: '/onboarding' })
+
+  // Step 7 (final, with concerns/feelings filled)
+  await setOnboardingProgress(7, {
+    baby_birth_date: '2026-02-15',
+    is_first_child: true,
+    feeding_type: 'exclusive',
+    breastfeeding_start_date: '2026-02-15',
+    current_rhythm: 'regular',
+    has_professional_support: false,
+    current_concern:
+      "Quelques douleurs au sein gauche depuis 2 jours, sans crevasse visible.",
+    general_feeling: "Fatiguée mais ça va, l'allaitement se met en place.",
+    baby_name: 'Lou',
+  })
+  await shoot('day-onboarding-step7', 14, { path: '/onboarding' })
+
+  // ─── Onboarded shoots: set the fixture profile ─────────────────────────
+  console.log('→ setting test user as ONBOARDED')
+  await clearOnboardingProgress()
+  await setOnboarded(true)
+
+  // Home (existing checkin variants)
   await shoot('day-checkin-open', 14, { checkin: 'open' })
   await shoot('day-checkin-collapsed', 14, { checkin: 'collapsed' })
   await shoot('day-no-checkin', 14, { checkin: 'none' })
   await shoot('night-checkin-open', 23, { checkin: 'open' })
   await shoot('night-checkin-collapsed', 23, { checkin: 'collapsed' })
 
-  // Login page (logged out)
+  // Settings
+  await shoot('day-settings', 14, { path: '/settings' })
+  await shoot('night-settings', 23, { path: '/settings' })
+
+  // Login page (logged out — no cookies)
   for (const [label, hour] of [['day-login', 14], ['night-login', 23]]) {
     const ctx = await browser.newContext({
       viewport: { width: 390, height: 844 },
