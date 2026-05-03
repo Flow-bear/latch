@@ -82,7 +82,7 @@ export async function GET(request: Request) {
     try {
       const response = await anthropic.messages.create({
         model: 'claude-sonnet-4-5',
-        max_tokens: 256,
+        max_tokens: 200,
         system: buildMorningCheckinSystem(profile),
         messages: [
           {

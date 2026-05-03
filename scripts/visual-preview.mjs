@@ -93,10 +93,19 @@ await new Promise((resolve) => {
 
 const browser = await chromium.launch({ headless: true })
 
-const MOCK_CHECKIN = {
+const MOCK_CHECKIN_SHORT = {
   id: 'preview-checkin',
   message:
-    "4 tétées hier soir, ~14 min côté droit en moyenne. Beau rythme. Pense à hydrater avant la tétée de nuit, c'est souvent la plus longue.",
+    '4 tétées hier soir, ~14 min côté droit en moyenne. Très proche de tes nuits de la semaine. Bon début de journée.',
+  read_at: null,
+}
+
+const MOCK_CHECKIN_LONG = {
+  id: 'preview-checkin',
+  // Mimics the verbose response that broke the layout pre-fix — used to
+  // verify the card cap (max-h) + bottom-aligned CTA hold up.
+  message:
+    "Deux tétées côté droit en soirée et nuit, durée non renseignée. C'est cohérent avec ta moyenne de 2 tétées par jour, toujours le sein droit ces derniers jours. Si tu souhaites équilibrer les deux côtés ou si le gauche devient inconfortable, tu peux proposer ce sein en premier à la prochaine tétée. Sinon, continue comme ça, le rythme reste dans tes habitudes des sept derniers jours.",
   read_at: null,
 }
 
@@ -162,7 +171,7 @@ async function clearOnboardingProgress() {
 /**
  * @param {string} label  filename suffix
  * @param {number} hour   forced hour (drives day/night mode via Date.getHours)
- * @param {{checkin?: 'open' | 'collapsed' | 'none', path?: string}} opts
+ * @param {{checkin?: 'open' | 'collapsed' | 'none' | 'long', path?: string}} opts
  */
 async function shoot(label, hour, opts = {}) {
   const context = await browser.newContext({
@@ -217,11 +226,15 @@ async function shoot(label, hour, opts = {}) {
         })
         return
       }
-      // open or collapsed: return the same payload; collapsed differs only via localStorage
+      // open / collapsed / long: return a checkin payload. Collapsed differs
+      // from open only via localStorage; long is the verbose-message variant
+      // used to stress-test the card height cap.
+      const payload =
+        opts.checkin === 'long' ? MOCK_CHECKIN_LONG : MOCK_CHECKIN_SHORT
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify(MOCK_CHECKIN),
+        body: JSON.stringify(payload),
       })
     })
   }
@@ -289,9 +302,11 @@ try {
 
   // Home (existing checkin variants)
   await shoot('day-checkin-open', 14, { checkin: 'open' })
+  await shoot('day-checkin-open-long', 14, { checkin: 'long' })
   await shoot('day-checkin-collapsed', 14, { checkin: 'collapsed' })
   await shoot('day-no-checkin', 14, { checkin: 'none' })
   await shoot('night-checkin-open', 23, { checkin: 'open' })
+  await shoot('night-checkin-open-long', 23, { checkin: 'long' })
   await shoot('night-checkin-collapsed', 23, { checkin: 'collapsed' })
 
   // Settings

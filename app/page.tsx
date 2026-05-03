@@ -150,7 +150,9 @@ export default function Home() {
               <div className={`text-xs tracking-[0.2em] uppercase mb-2 ${c.muted}`}>
                 Bonjour
               </div>
-              <p className="text-base leading-relaxed mb-4">{checkin.message}</p>
+              <p className="text-base leading-relaxed mb-4 max-h-[32vh] overflow-y-auto pr-1">
+                {checkin.message}
+              </p>
               <div className="flex items-center justify-between gap-3">
                 <span className={`text-xs italic ${c.muted}`}>
                   Ces messages ne remplacent pas l&apos;avis d&apos;un
@@ -182,7 +184,7 @@ export default function Home() {
           </div>
         )}
 
-        <div className="flex-1 flex flex-col items-center justify-center gap-6 px-6">
+        <div className="flex-1 flex flex-col items-center justify-end gap-6 px-6 pb-8">
           <div className="flex gap-3 w-60">
             {(['left', 'right'] as const).map((s) => {
               const active = suggestedSide === s
