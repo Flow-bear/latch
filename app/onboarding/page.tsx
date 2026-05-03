@@ -214,14 +214,14 @@ export default function OnboardingPage() {
 
   if (loading) {
     return (
-      <main className={`min-h-screen flex items-center justify-center ${c.bg}`}>
+      <main className={`min-h-[100dvh] flex items-center justify-center ${c.bg}`}>
         <div className={`text-xs tracking-[0.32em] uppercase ${c.muted}`}>…</div>
       </main>
     )
   }
 
   return (
-    <main className={`min-h-screen flex flex-col ${c.bg} ${c.text}`}>
+    <main className={`min-h-[100dvh] flex flex-col ${c.bg} ${c.text}`}>
       {/* Header: progress */}
       <header className="px-6 pt-8 pb-6">
         <div className={`text-xs tracking-[0.2em] uppercase mb-3 ${c.muted}`}>

@@ -133,14 +133,14 @@ export default function SettingsPage() {
 
   if (loading) {
     return (
-      <main className={`min-h-screen flex items-center justify-center ${c.bg}`}>
+      <main className={`min-h-[100dvh] flex items-center justify-center ${c.bg}`}>
         <div className={`text-xs tracking-[0.32em] uppercase ${c.muted}`}>…</div>
       </main>
     )
   }
 
   return (
-    <main className={`min-h-screen flex flex-col ${c.bg} ${c.text}`}>
+    <main className={`min-h-[100dvh] flex flex-col ${c.bg} ${c.text}`}>
       <header className="px-6 pt-6 pb-2 flex items-center justify-between">
         <Link
           href="/"

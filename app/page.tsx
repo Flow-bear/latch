@@ -128,7 +128,7 @@ export default function Home() {
   // ─── IDLE ────────────────────────────────────────────────────────────────
   if (state === 'idle') {
     return (
-      <main className={`min-h-screen flex flex-col ${c.bg} ${c.text}`}>
+      <main className={`min-h-[100dvh] flex flex-col ${c.bg} ${c.text}`}>
         <header className="px-6 pt-6 pb-2 flex items-center justify-between">
           <h1
             className={`text-base font-light tracking-[0.32em] uppercase ${c.soft}`}
@@ -150,7 +150,7 @@ export default function Home() {
               <div className={`text-xs tracking-[0.2em] uppercase mb-2 ${c.muted}`}>
                 Bonjour
               </div>
-              <p className="text-base leading-relaxed mb-4 max-h-44 overflow-y-auto pr-1">
+              <p className="text-base leading-relaxed mb-4 max-h-36 overflow-y-auto pr-1">
                 {checkin.message}
               </p>
               <div className="flex items-center justify-between gap-3">
@@ -224,7 +224,7 @@ export default function Home() {
   // ─── ACTIVE ──────────────────────────────────────────────────────────────
   if (state === 'active') {
     return (
-      <main className={`min-h-screen flex flex-col items-center justify-center ${c.bg}`}>
+      <main className={`min-h-[100dvh] flex flex-col items-center justify-center ${c.bg}`}>
         <div className={`text-xs tracking-[0.32em] uppercase mb-10 ${c.muted}`}>
           Côté&nbsp;·&nbsp;{labelSide(side)}
         </div>
@@ -246,7 +246,7 @@ export default function Home() {
 
   // ─── DONE ────────────────────────────────────────────────────────────────
   return (
-    <main className={`min-h-screen flex flex-col p-6 ${c.bg} ${c.text}`}>
+    <main className={`min-h-[100dvh] flex flex-col p-6 ${c.bg} ${c.text}`}>
       <div className="flex-1 flex flex-col justify-center max-w-md w-full mx-auto">
         <p className={`text-xs tracking-[0.32em] uppercase mb-2 ${c.muted}`}>
           Tétée enregistrée
