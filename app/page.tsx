@@ -56,6 +56,14 @@ export default function Home() {
     }
   }, [])
 
+  useEffect(() => {
+    if (state !== 'active' || !startedAt) return
+    const id = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - startedAt.getTime()) / 1000))
+    }, 1000)
+    return () => clearInterval(id)
+  }, [state, startedAt])
+
   async function dismissCheckin() {
     if (!checkin) return
     const supabase = createClient()
@@ -65,14 +73,6 @@ export default function Home() {
       .eq('id', checkin.id)
     setCheckin(null)
   }
-
-  useEffect(() => {
-    if (state !== 'active' || !startedAt) return
-    const id = setInterval(() => {
-      setElapsed(Math.floor((Date.now() - startedAt.getTime()) / 1000))
-    }, 1000)
-    return () => clearInterval(id)
-  }, [state, startedAt])
 
   function startFeeding() {
     setSide(suggestedSide)
@@ -107,47 +107,73 @@ export default function Home() {
     setState('idle')
   }
 
+  // ─── Palette ─────────────────────────────────────────────────────────────
+  // Night: warm espresso + soft cream (not harsh red on black)
+  // Day:   warm linen cream + deep warm brown (not clinical white)
+  const c = night
+    ? {
+        bg: 'bg-[#1a1410]',
+        text: 'text-[#d4b896]',
+        muted: 'text-[#d4b896]/55',
+        soft: 'text-[#d4b896]/75',
+        ring: 'border-[#d4b896]/25',
+        ringStrong: 'border-[#d4b896]/50',
+        hoverFill: 'active:bg-[#d4b896]/10',
+        cardBg: 'bg-[#241c17]',
+        cardBorder: 'border-[#d4b896]/15',
+        inputBg: 'bg-[#241c17]',
+        accent: 'bg-[#c89878]',
+        accentText: 'text-[#1a1410]',
+        emojiSelectedBg: 'bg-[#d4b896]/15',
+        emojiSelectedRing: 'ring-[#d4b896]/50',
+        emojiBg: 'bg-[#241c17]',
+      }
+    : {
+        bg: 'bg-[#f7f2e9]',
+        text: 'text-[#2c241e]',
+        muted: 'text-[#2c241e]/55',
+        soft: 'text-[#2c241e]/75',
+        ring: 'border-[#2c241e]/15',
+        ringStrong: 'border-[#2c241e]/40',
+        hoverFill: 'active:bg-[#2c241e]/5',
+        cardBg: 'bg-[#efe7d7]',
+        cardBorder: 'border-[#2c241e]/10',
+        inputBg: 'bg-white',
+        accent: 'bg-[#b07050]',
+        accentText: 'text-[#f7f2e9]',
+        emojiSelectedBg: 'bg-[#2c241e]/8',
+        emojiSelectedRing: 'ring-[#2c241e]/40',
+        emojiBg: 'bg-[#efe7d7]',
+      }
+
+  // ─── IDLE ────────────────────────────────────────────────────────────────
   if (state === 'idle') {
     const showCheckin = checkin && !checkin.read_at
     return (
-      <main
-        className={`min-h-screen flex flex-col ${
-          night ? 'bg-black text-[#8B0000]' : 'bg-white text-neutral-900'
-        }`}
-      >
+      <main className={`min-h-screen flex flex-col ${c.bg} ${c.text}`}>
+        <header className="px-6 pt-6 pb-2 flex items-center justify-between">
+          <h1
+            className={`text-base font-light tracking-[0.32em] uppercase ${c.soft}`}
+          >
+            Latch
+          </h1>
+        </header>
+
         {showCheckin && (
-          <div className="px-6 pt-6">
-            <div
-              className={`rounded-2xl p-5 ${
-                night
-                  ? 'border border-[#8B0000]/40 bg-black'
-                  : 'bg-neutral-100'
-              }`}
-            >
-              <div
-                className={`text-xs uppercase tracking-wide mb-2 ${
-                  night ? 'text-[#8B0000]/60' : 'text-neutral-500'
-                }`}
-              >
+          <div className="px-6 mt-4">
+            <div className={`rounded-3xl p-5 border ${c.cardBg} ${c.cardBorder}`}>
+              <div className={`text-xs tracking-[0.2em] uppercase mb-2 ${c.muted}`}>
                 Bonjour
               </div>
-              <p className="text-base leading-relaxed mb-4">
-                {checkin.message}
-              </p>
+              <p className="text-base leading-relaxed mb-4">{checkin.message}</p>
               <div className="flex items-center justify-between gap-3">
-                <span
-                  className={`text-xs italic ${
-                    night ? 'text-[#8B0000]/50' : 'text-neutral-400'
-                  }`}
-                >
+                <span className={`text-xs italic ${c.muted}`}>
                   Ces messages ne remplacent pas l&apos;avis d&apos;un
                   professionnel de santé.
                 </span>
                 <button
                   onClick={dismissCheckin}
-                  className={`text-sm underline underline-offset-2 shrink-0 ${
-                    night ? 'text-[#8B0000]/80' : 'text-neutral-600'
-                  }`}
+                  className={`text-xs underline underline-offset-2 shrink-0 ${c.soft}`}
                 >
                   Lu
                 </button>
@@ -155,66 +181,53 @@ export default function Home() {
             </div>
           </div>
         )}
-        <div
-          className={`px-6 pt-6 text-sm ${
-            night ? 'text-[#8B0000]/70' : 'text-neutral-500'
-          }`}
-        >
-          Côté suggéré&nbsp;:{' '}
-          <span
-            className={`font-medium ${
-              night ? 'text-[#8B0000]' : 'text-neutral-900'
-            }`}
+
+        <div className="flex-1 flex flex-col items-center justify-center gap-8 px-6">
+          <div className={`text-xs tracking-[0.32em] uppercase ${c.muted}`}>
+            Côté&nbsp;·&nbsp;{labelSide(suggestedSide)}
+          </div>
+
+          <button
+            onClick={startFeeding}
+            aria-label={`Démarrer une tétée côté ${labelSide(suggestedSide)}`}
+            className={`w-60 h-60 rounded-full border-2 flex items-center justify-center text-2xl font-light tracking-wide transition-colors ${c.ringStrong} ${c.text} ${c.hoverFill}`}
           >
-            {labelSide(suggestedSide)}
-          </span>
+            Démarrer
+          </button>
+
           <button
             onClick={() =>
               setSuggestedSide(suggestedSide === 'left' ? 'right' : 'left')
             }
-            className="ml-3 underline underline-offset-2"
+            className={`text-xs underline underline-offset-4 ${c.muted}`}
           >
-            changer
+            Changer de côté
           </button>
         </div>
-        <button
-          onClick={startFeeding}
-          className={`flex-1 m-6 rounded-3xl text-4xl font-medium transition-colors ${
-            night
-              ? 'border-2 border-[#8B0000] text-[#8B0000] active:bg-[#8B0000]/10'
-              : 'bg-neutral-900 text-white active:bg-neutral-700'
-          }`}
-        >
-          Démarrer tétée
-        </button>
+
+        <footer className={`text-center pb-6 text-xs tracking-[0.2em] uppercase ${c.muted}`}>
+          {new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}
+        </footer>
       </main>
     )
   }
 
+  // ─── ACTIVE ──────────────────────────────────────────────────────────────
   if (state === 'active') {
     return (
-      <main className="min-h-screen flex flex-col items-center justify-center bg-black">
-        <div
-          className={`text-sm uppercase tracking-widest mb-6 ${
-            night ? 'text-[#8B0000]/70' : 'text-white/60'
-          }`}
-        >
-          {labelSide(side)}
+      <main className={`min-h-screen flex flex-col items-center justify-center ${c.bg}`}>
+        <div className={`text-xs tracking-[0.32em] uppercase mb-10 ${c.muted}`}>
+          Côté&nbsp;·&nbsp;{labelSide(side)}
         </div>
         <div
-          className={`text-8xl font-light tabular-nums mb-16 ${
-            night ? 'text-[#8B0000]' : 'text-white'
-          }`}
+          className={`text-8xl font-light tabular-nums mb-20 tracking-tight ${c.text}`}
         >
           {formatTime(elapsed)}
         </div>
         <button
           onClick={stopFeeding}
-          className={`rounded-full text-2xl font-medium px-20 py-7 transition-colors ${
-            night
-              ? 'border-2 border-[#8B0000] text-[#8B0000] active:bg-[#8B0000]/10'
-              : 'bg-red-600 text-white active:bg-red-700'
-          }`}
+          aria-label="Arrêter la tétée"
+          className={`w-36 h-36 rounded-full border-2 text-xl font-light tracking-wide transition-colors ${c.ringStrong} ${c.text} ${c.hoverFill}`}
         >
           Stop
         </button>
@@ -222,80 +235,58 @@ export default function Home() {
     )
   }
 
+  // ─── DONE ────────────────────────────────────────────────────────────────
   return (
-    <main
-      className={`min-h-screen flex flex-col p-6 ${
-        night ? 'bg-black text-[#8B0000]' : 'bg-white text-neutral-900'
-      }`}
-    >
-      <div
-        className={`text-sm mb-1 ${
-          night ? 'text-[#8B0000]/70' : 'text-neutral-500'
-        }`}
-      >
-        Tétée enregistrée
-      </div>
-      <div className="text-2xl font-medium mb-10">
-        {formatTime(elapsed)} · {labelSide(side)}
-      </div>
-      <div
-        className={`text-lg mb-4 ${
-          night ? 'text-[#8B0000]/80' : 'text-neutral-700'
-        }`}
-      >
-        Comment tu te sens&nbsp;?
-      </div>
-      <div className="flex gap-3 mb-8">
-        {(['😊', '😐', '😣'] as const).map((emoji) => (
+    <main className={`min-h-screen flex flex-col p-6 ${c.bg} ${c.text}`}>
+      <div className="flex-1 flex flex-col justify-center max-w-md w-full mx-auto">
+        <p className={`text-xs tracking-[0.32em] uppercase mb-2 ${c.muted}`}>
+          Tétée enregistrée
+        </p>
+        <p className="text-3xl font-light mb-12 tabular-nums">
+          {formatTime(elapsed)}
+          <span className={`mx-3 ${c.muted}`}>·</span>
+          <span className="font-normal">{labelSide(side)}</span>
+        </p>
+
+        <p className={`text-sm mb-4 ${c.soft}`}>Comment tu te sens&nbsp;?</p>
+        <div className="flex gap-3 mb-8">
+          {(['😊', '😐', '😣'] as const).map((emoji) => (
+            <button
+              key={emoji}
+              onClick={() => setMood(emoji)}
+              className={`flex-1 text-4xl py-5 rounded-3xl transition-all ${
+                mood === emoji
+                  ? `${c.emojiSelectedBg} ring-2 ${c.emojiSelectedRing}`
+                  : `${c.emojiBg} ${c.hoverFill}`
+              }`}
+            >
+              {emoji}
+            </button>
+          ))}
+        </div>
+
+        <textarea
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          placeholder="Une note pour toi-même…"
+          rows={3}
+          className={`rounded-3xl border p-4 text-base resize-none mb-8 focus:outline-none focus:ring-2 ${c.inputBg} ${c.cardBorder} ${c.text} placeholder:opacity-40`}
+        />
+
+        <div className="flex gap-3">
           <button
-            key={emoji}
-            onClick={() => setMood(emoji)}
-            className={`flex-1 text-5xl py-6 rounded-2xl transition-colors ${
-              mood === emoji
-                ? night
-                  ? 'bg-[#8B0000]/20 ring-2 ring-[#8B0000]'
-                  : 'bg-neutral-900 ring-2 ring-neutral-900'
-                : night
-                  ? 'bg-neutral-950 active:bg-neutral-900'
-                  : 'bg-neutral-100 active:bg-neutral-200'
-            }`}
+            onClick={() => persistAndReset(true)}
+            className={`flex-1 rounded-full py-4 text-base font-light tracking-wide transition-colors ${c.accent} ${c.accentText} active:opacity-80`}
           >
-            {emoji}
+            Sauvegarder
           </button>
-        ))}
-      </div>
-      <textarea
-        value={note}
-        onChange={(e) => setNote(e.target.value)}
-        placeholder="Note (optionnel)"
-        className={`rounded-2xl border p-4 text-base resize-none mb-8 focus:outline-none focus:ring-2 ${
-          night
-            ? 'bg-black border-[#8B0000]/40 text-[#8B0000] placeholder-[#8B0000]/40 focus:ring-[#8B0000]'
-            : 'border-neutral-200 focus:ring-neutral-900'
-        }`}
-        rows={3}
-      />
-      <div className="flex gap-3 mt-auto">
-        <button
-          onClick={() => persistAndReset(true)}
-          className={`flex-1 rounded-2xl py-4 text-lg font-medium transition-colors ${
-            night
-              ? 'border-2 border-[#8B0000] text-[#8B0000] active:bg-[#8B0000]/10'
-              : 'bg-neutral-900 text-white active:bg-neutral-700'
-          }`}
-        >
-          Sauvegarder
-        </button>
-        <button
-          onClick={() => persistAndReset(false)}
-          className={`rounded-2xl py-4 px-6 text-lg transition-colors ${
-            night
-              ? 'border border-[#8B0000]/40 text-[#8B0000]/70 active:bg-[#8B0000]/10'
-              : 'bg-neutral-100 text-neutral-600 active:bg-neutral-200'
-          }`}
-        >
-          Skip
-        </button>
+          <button
+            onClick={() => persistAndReset(false)}
+            className={`rounded-full py-4 px-6 text-sm font-light tracking-wide transition-colors border ${c.cardBorder} ${c.soft} ${c.hoverFill}`}
+          >
+            Skip
+          </button>
+        </div>
       </div>
     </main>
   )
