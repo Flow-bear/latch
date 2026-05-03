@@ -16,10 +16,12 @@
 - [Prompts LLM](#prompts-llm)
 - [Cron du check-in matin](#cron-du-check-in-matin)
 - [Eval harness](#eval-harness)
+- [Tests E2E](#tests-e2e)
 - [PWA](#pwa)
 - [Variables d'environnement](#variables-denvironnement)
 - [Configuration Supabase](#configuration-supabase)
 - [Configuration Vercel](#configuration-vercel)
+- [Configuration Resend](#configuration-resend)
 - [Setup local](#setup-local)
 - [Build & déploiement](#build--déploiement)
 - [Troubleshooting](#troubleshooting)
@@ -31,13 +33,14 @@
 | Couche | Choix | Notes |
 |---|---|---|
 | Framework | Next.js 14 (App Router) | Une seule codebase front+back |
-| Style | Tailwind CSS | Mobile-first |
-| DB cloud + Auth | Supabase | RLS strict, magic link, EU region |
+| Style | Tailwind CSS | Mobile-first, palette warm intimate |
+| DB cloud + Auth | Supabase (Frankfurt EU) | RLS strict, magic link + OTP, custom SMTP via Resend |
 | DB locale (offline) | IndexedDB via Dexie 4 | Source de vérité pendant le log |
-| LLM | Claude Sonnet 4.5 (via `@anthropic-ai/sdk`) | Qualité du français, prompts contraints |
-| Hébergement | Vercel | Cron jobs natifs, deploy GitHub-based |
+| LLM | Claude Sonnet 4.5 (`@anthropic-ai/sdk`) | Qualité du français, prompts contraints |
+| SMTP | Resend (free tier 3000/mois) | Sender `onboarding@resend.dev` (à migrer vers domaine vérifié avant beta) |
+| Hébergement | Vercel Hobby | Cron quotidien (limite Hobby), deploy GitHub-based |
 | PWA | `next-pwa` | Service worker auto-généré |
-| TS runner (scripts) | `tsx` | Pour le harness d'évaluation |
+| Tests E2E | Playwright + scripts ad-hoc | `npm run` non utilisé, scripts dans `scripts/` |
 
 ## Arborescence
 
@@ -48,36 +51,40 @@ latch/
 │   │   └── checkin/route.ts        # Cron handler — génère le check-in matin
 │   ├── auth/
 │   │   └── callback/route.ts       # Échange magic-link code → session
-│   ├── login/page.tsx              # Magic link form
+│   ├── login/page.tsx              # Email + OTP code 2-step (ou magic link)
 │   ├── layout.tsx                  # Metadata + manifest + theme color
 │   ├── page.tsx                    # State machine idle → active → done
 │   └── globals.css
 ├── lib/
 │   ├── supabase/
 │   │   ├── client.ts               # createBrowserClient
-│   │   ├── server.ts               # createServerClient (pour Server Components)
+│   │   ├── server.ts               # createServerClient (Server Components)
 │   │   └── middleware.ts           # Refresh session + auth gate
 │   ├── hooks/
-│   │   └── useNightMode.ts         # Détection heure 21h-7h
-│   ├── db.ts                       # Dexie schema (table feedings)
+│   │   └── useNightMode.ts         # Détection 21h-7h
+│   ├── db.ts                       # Dexie schema (table feedings, v2)
 │   ├── sync.ts                     # IndexedDB → Supabase upsert
 │   ├── prompts.ts                  # Prompts 1 et 2 (PRD §5)
 │   └── feeding-stats.ts            # Formatters pour les payloads LLM
 ├── public/
-│   ├── manifest.json
-│   ├── icon-192.png                # Placeholder L blanc sur fond noir
-│   └── icon-512.png
+│   ├── manifest.json               # PWA, theme #1a1410
+│   ├── icon-192.png / icon-512.png # Placeholders L blanc / fond noir
 ├── scripts/
-│   └── evals.ts                    # Harness eval (10 fixtures)
+│   ├── apply-schema.mjs            # Apply supabase/schema.sql via Mgmt API
+│   ├── evals.ts                    # Harness eval LLM (10 fixtures)
+│   ├── e2e-login.mjs               # Test UI login (Playwright)
+│   ├── e2e-feeding.mjs             # Test data path REST (auth, RLS, sync)
+│   ├── e2e-browser.mjs             # Test UI authentifié end-to-end
+│   └── visual-preview.mjs          # Screenshots day+night avant deploy
 ├── supabase/
-│   └── schema.sql                  # Tables + RLS + trigger profile
+│   └── schema.sql                  # Tables + RLS + trigger profile auto
 ├── docs/
 │   ├── FUNCTIONAL.md
 │   └── TECHNICAL.md                # ← ce fichier
 ├── middleware.ts                   # Top-level Next.js middleware
 ├── next.config.mjs                 # next-pwa wrapper
-├── vercel.json                     # Cron config
-└── package.json
+├── vercel.json                     # Cron daily 8 UTC
+└── package.json                    # scripts: dev, build, lint, eval
 ```
 
 ## Architecture
@@ -85,17 +92,17 @@ latch/
 ```
                 ┌────────────────────────┐
                 │  Browser (PWA installée│
-                │   ou onglet Safari)    │
+                │  ou onglet Safari)     │
                 └────────────┬───────────┘
                              │
               ┌──────────────┴──────────────┐
               │                             │
-         ┌────▼────┐                  ┌─────▼──────┐
-         │ IndexedDB│ ◄─── source ─►  │  Next.js   │
-         │  (Dexie) │     of truth    │  on Vercel │
-         └────┬─────┘                 └─────┬──────┘
+         ┌────▼─────┐                  ┌────▼───────┐
+         │ IndexedDB│ ◄─── source ─►   │  Next.js   │
+         │  (Dexie) │     of truth     │  on Vercel │
+         └────┬─────┘                  └────┬───────┘
               │                             │
-              │   sync.ts (upsert by         │
+              │   sync.ts (upsert by        │
               │   user_id, client_id)       │
               │                             │
               │                       ┌─────▼──────┐
@@ -105,12 +112,16 @@ latch/
                                       └─────▲──────┘
                                             │
                             ┌───────────────┴───────────┐
-                            │  Vercel Cron (hourly)     │
+                            │  Vercel Cron (daily 8UTC) │
                             │  /api/checkin             │
                             │  → service-role client    │
                             │  → Claude Sonnet 4.5      │
                             │  → insert morning_checkins│
                             └───────────────────────────┘
+
+                                Auth emails:
+                            Supabase Auth → Resend SMTP
+                            → user inbox
 ```
 
 **Idées-clés :**
@@ -119,74 +130,85 @@ latch/
 - **Sync idempotente** : chaque tétée a un `client_id` UUID généré côté client. Le serveur a une contrainte `unique (user_id, client_id)` → `upsert` ne dupe jamais.
 - **Cron côté serveur** : utilise la `service_role_key` Supabase qui bypass RLS pour pouvoir lire et écrire sur tous les utilisateurs.
 - **Auth client-side** : le browser client utilise la `anon_key` + RLS, l'utilisateur ne voit que ses propres données.
+- **Cookies SSR** : `@supabase/ssr` v0.10 stocke la session dans un cookie `sb-<ref>-auth-token` au format `base64-<base64url(JSON.stringify(session))>`, chunké si > 3180 bytes.
 
 ## Schéma de données
 
 Source : `supabase/schema.sql`. Quatre tables, toutes avec RLS strict.
 
 ```sql
-profiles (id pk, baby_name, baby_birth_date, timezone, created_at)
-   id : uuid -> auth.users(id)
-   trigger : on_auth_user_created → insert profile auto
+profiles (
+  id uuid pk -> auth.users(id) on delete cascade,
+  baby_name text, baby_birth_date date,
+  timezone text default 'Europe/Paris',
+  created_at timestamptz
+)
+   trigger on_auth_user_created → insert profile auto
 
 feedings (
-  id pk uuid,
-  user_id -> auth.users(id),
-  client_id uuid,                            -- généré côté client (Dexie)
+  id pk uuid default gen_random_uuid(),
+  user_id -> auth.users(id) on delete cascade,
+  client_id uuid,                       -- généré côté client (Dexie)
   started_at, ended_at timestamptz,
-  side text in ('left','right','both'),
+  side text check ('left'|'right'|'both'),
   mood_emoji text nullable,
   note text default '',
-  unique (user_id, client_id)                -- pour upsert idempotent
+  unique (user_id, client_id)           -- pour upsert idempotent
 )
 
 morning_checkins (
-  id, user_id, for_date date, message text, read_at timestamptz nullable,
-  unique (user_id, for_date)                 -- 1 check-in / jour / user
+  id, user_id, for_date date,
+  message text, read_at timestamptz nullable,
+  unique (user_id, for_date)            -- 1 check-in / jour / user
 )
 
 ai_questions (
-  id, user_id, question text, response text nullable, asked_at
+  id, user_id, question text,
+  response text nullable, asked_at
 )
 ```
 
 **Politique RLS** :
 
-- `profiles`, `feedings`, `ai_questions` : SELECT/INSERT/UPDATE/DELETE seulement sur `user_id = auth.uid()`
+- `profiles`, `feedings`, `ai_questions` : SELECT/INSERT/UPDATE/DELETE seulement sur `user_id = auth.uid()` (`profiles.id` pour profiles)
 - `morning_checkins` : SELECT et UPDATE pour le user (read_at). **Pas de policy INSERT** — seul le cron (service_role) écrit.
 
 ## Routes
 
 | Path | Type | Auth | Rôle |
 |---|---|---|---|
-| `/` | page client | requise | State machine idle/active/done + carte check-in |
-| `/login` | page client | publique | Saisie email → `signInWithOtp` |
-| `/auth/callback` | route handler | publique | Échange code → session, redirige vers `/` |
-| `/api/checkin` | route handler | header `Bearer $CRON_SECRET` | Cron horaire, filtre tz, génère check-in |
+| `/` | client page | requise | State machine idle/active/done + carte check-in |
+| `/login` | client page | publique | Email → OTP code 6 chiffres OU magic link |
+| `/auth/callback` | route handler | publique | Échange `?code=` (PKCE) → session, redirige vers `/` |
+| `/api/checkin` | route handler | header `Bearer $CRON_SECRET` | Cron quotidien, génère check-in pour tous les profiles |
 
-`middleware.ts` redirige toute requête non-authentifiée vers `/login`, sauf `/login`, `/auth/*`, et les assets PWA (`manifest.json`, `sw.js`, `workbox-*.js`, icônes).
+`middleware.ts` redirige toute requête non-authentifiée vers `/login`, sauf `/login`, `/auth/*`, `/api/*` (les API gèrent leur propre auth), et les assets PWA.
 
 ## Auth flow
+
+Deux chemins, **même email** envoyé par Resend :
 
 ```
 User → /login → tape email → signInWithOtp({email, emailRedirectTo: /auth/callback})
                                           │
                                           ▼
-                            Supabase envoie email magic link
+                            Supabase → Resend SMTP → email avec :
+                            • Code 6 chiffres en gros
+                            • Magic link en dessous
                                           │
-                                          ▼
-                              User clique le lien
-                                          │
-                                          ▼
-                       Browser → /auth/callback?code=...
-                                          │
-                                          ▼
-                       Server : exchangeCodeForSession(code)
-                                          │
-                                          ▼
-                          Cookies HTTP-only posés
-                                          │
-                                          ▼
+                  ┌───────────────────────┴───────────────────────┐
+                  │                                               │
+        OPTION A — Code OTP                              OPTION B — Magic link
+                  │                                               │
+                  ▼                                               ▼
+   /login step 'code' → tape les 6 chiffres        Click le lien dans l'email
+   → verifyOtp({email, token, type: 'email'})      → /auth/callback?code=...
+                  │                                               │
+                  ▼                                               ▼
+   Cookie SSR posé via createBrowserClient         Server : exchangeCodeForSession(code)
+                  │                                               │
+                  └───────────────────┬───────────────────────────┘
+                                      ▼
                               Redirect → /
 ```
 
@@ -213,7 +235,7 @@ Code : `lib/sync.ts`
 5. Sur succès, marque chaque ligne synced=true dans Dexie
 ```
 
-L'idempotence vient de la contrainte unique `(user_id, client_id)` côté Postgres : un même retry insère 0 ligne, met à jour 0 ligne (les valeurs sont les mêmes).
+L'idempotence vient de la contrainte unique `(user_id, client_id)` côté Postgres.
 
 ## Mode offline
 
@@ -225,7 +247,7 @@ L'app fonctionne **complètement** sans connexion ni compte :
 
 Limitations connues :
 - Le check-in matin n'est **pas dispo offline** (généré côté serveur)
-- L'auth magic link nécessite forcément du réseau
+- L'auth nécessite forcément du réseau
 
 ## Prompts LLM
 
@@ -233,7 +255,7 @@ Fichier : `lib/prompts.ts`. Versionnés dans le repo, testés par `scripts/evals
 
 | Constante | Quand | Modèle | Max tokens |
 |---|---|---|---|
-| `MORNING_CHECKIN_SYSTEM` | Cron quotidien à 9h heure locale | claude-sonnet-4-5 | 256 |
+| `MORNING_CHECKIN_SYSTEM` | Cron quotidien (8h UTC) | claude-sonnet-4-5 | 256 |
 | `ASK_QUESTION_SYSTEM` | Action « C'est normal ? » (V2) | claude-sonnet-4-5 | 512 |
 
 Données envoyées au modèle (formatters dans `lib/feeding-stats.ts`) :
@@ -247,18 +269,18 @@ Config Vercel (`vercel.json`) :
 
 ```json
 {
-  "crons": [{ "path": "/api/checkin", "schedule": "0 * * * *" }]
+  "crons": [{ "path": "/api/checkin", "schedule": "0 8 * * *" }]
 }
 ```
 
-Le cron tourne **toutes les heures (UTC)**. Le route handler filtre côté API : pour chaque profile, calcule l'heure locale via `Intl.DateTimeFormat` + `timezone`. Si l'heure locale = 9, génère le check-in (sauf s'il existe déjà pour ce `for_date`).
+Le cron tourne **une fois par jour à 8h UTC** = 9-10h Paris selon DST. Choix lié au plan Vercel **Hobby** qui ne permet qu'un cron quotidien max — pas de filtre par timezone côté handler. Pour passer en multi-user avec horaires locaux, upgrade Pro + restaurer le filtre `localHour === 9` dans `app/api/checkin/route.ts`.
 
 L'auth du cron : Vercel inject le header `Authorization: Bearer <CRON_SECRET>`. La route vérifie `process.env.CRON_SECRET`.
 
 **Skip conditions** :
 
-- Pas de `feedings` dans les dernières 24h → skip (pas de message vide)
-- Check-in existe déjà pour aujourd'hui → skip (idempotence cron retry)
+- Pas de `feedings` dans les dernières 24h pour un user → skip ce user
+- Check-in existe déjà pour aujourd'hui pour un user → skip (idempotence cron retry)
 
 ## Eval harness
 
@@ -274,19 +296,37 @@ Lance `scripts/evals.ts` qui :
 4. Évalue heuristiquement : regex `mustInclude` / `mustNotInclude`
 5. Affiche pass/fail par cas et un score final
 
-**Bar à ship** : ≥ 18/20 (PRD §5). En attendant que les 10 derniers cas soient ajoutés (cas réels du créateur), bar provisoire à 8/10.
+**Bar à ship** : ≥ 18/20 (PRD §5). En attendant que les 10 derniers cas soient ajoutés, bar provisoire à 8/10.
 
 Si un cas fail, soit le prompt est faux, soit l'heuristique est trop stricte. Itérer le prompt avant l'heuristique.
 
+## Tests E2E
+
+Trois scripts complémentaires dans `scripts/`, lancés à la main avec `node scripts/<name>.mjs` :
+
+| Script | Couvre | Output |
+|---|---|---|
+| `e2e-login.mjs` | Routing, UI publique login, formulaire, SMTP Resend | 9/9 ✅ + screenshots `1-login.png`, `2-filled.png`, `3-sent.png` |
+| `e2e-feeding.mjs` | OTP admin, verifyOtp REST, upsert authentifié, RLS | 10/10 ✅ |
+| `e2e-browser.mjs` | UI authentifiée full Playwright (cookie injection), state machine, sync IndexedDB → Supabase | 15/15 ✅ + screenshots `b1-idle.png` à `b4-mood.png` |
+
+`visual-preview.mjs` lance un `next start` local et prend 4 screenshots (idle/login × jour/nuit) — utile avant chaque redesign.
+
+Total **34/34** sur les 3 dimensions critiques.
+
+**Cookie injection trick** (`e2e-browser.mjs`) : on évite la livraison d'email en mintant la session via admin + verifyOtp REST, puis en construisant le cookie SSR au format `base64-<base64url(session)>` (chunké si besoin via `createChunks` de `@supabase/ssr/dist/main/utils/chunker.js`).
+
 ## PWA
 
-- `public/manifest.json` : nom Latch, display standalone, orientation portrait, theme #000
+- `public/manifest.json` : nom Latch, display standalone, orientation portrait, theme `#1a1410`, background `#1a1410`
 - `public/icon-192.png` & `icon-512.png` : placeholders (L blanc, fond noir)
 - `next.config.mjs` wrap avec `next-pwa` : génère `public/sw.js` et `public/workbox-*.js` au build
 - Le service worker est désactivé en dev (`disable: process.env.NODE_ENV === 'development'`)
-- `app/layout.tsx` lie le manifest et expose `viewport.themeColor`
+- `app/layout.tsx` lie le manifest et expose `viewport.themeColor` avec media-query (cream `#f7f2e9` en light, espresso `#1a1410` en dark)
 
 **Installation iOS** : Safari uniquement → Partager → Sur l'écran d'accueil. Chrome iOS ne peut pas installer une PWA (limitation Apple).
+
+**Mise à jour de l'app** : `next-pwa` configuré avec `skipWaiting: true`. Le SW prend la nouvelle version au prochain chargement. Si bloqué : DevTools → Application → Service Workers → Unregister, puis F5.
 
 ## Variables d'environnement
 
@@ -296,32 +336,63 @@ Fichier : `.env.local` (jamais commité, listé dans `.gitignore`).
 |---|---|---|
 | `NEXT_PUBLIC_SUPABASE_URL` | Endpoint Supabase | client + serveur |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Auth anon (passe RLS) | client + serveur |
-| `SUPABASE_SERVICE_ROLE_KEY` | Bypass RLS (cron) | serveur uniquement |
+| `SUPABASE_SERVICE_ROLE_KEY` | Bypass RLS (cron, scripts admin) | serveur uniquement |
 | `ANTHROPIC_API_KEY` | Claude API | serveur uniquement |
-| `CRON_SECRET` | Auth header injecté par Vercel Cron | serveur uniquement |
+| `CRON_SECRET` | Auth header injecté par Vercel Cron (sans newline trailing) | serveur uniquement |
 
 Sur Vercel : Settings → Environment Variables. Toutes les vars doivent exister en `Production` (et idéalement `Preview`).
 
 ## Configuration Supabase
 
-À faire **une fois** par déploiement (manuel via dashboard) :
+Driveable via la Supabase Management API avec un Personal Access Token (`sbp_*`). Tout est scriptable.
 
-1. **Schéma** : SQL Editor → coller `supabase/schema.sql` → Run
-2. **Auth → URL Configuration** :
-   - Site URL : `https://<vercel-domain>`
-   - Redirect URLs (allow-list) : `https://<vercel-domain>/auth/callback`
-3. **Auth → Email Templates** (optionnel) : personnaliser le template magic link
-4. **Auth → Providers → Email** : vérifier que « Enable email confirmations » est activé
+**Schéma SQL** :
+```bash
+node scripts/apply-schema.mjs <project-ref> <pat>
+```
 
-Le SMTP par défaut de Supabase est limité à ~4 emails/h en free tier. Avant la beta externe → migrer vers Resend (3000 emails/mois gratuits).
+**Auth URLs** (PATCH `/v1/projects/{ref}/config/auth`) :
+- `site_url`: `https://<vercel-domain>`
+- `uri_allow_list`: `https://<vercel-domain>/auth/callback,https://<vercel-domain>/**`
+
+**SMTP** (Resend) :
+- `smtp_host`: `smtp.resend.com`
+- `smtp_port`: `"465"` (string!)
+- `smtp_user`: `resend`
+- `smtp_pass`: `re_...` (Resend API key)
+- `smtp_admin_email`: `onboarding@resend.dev` (ou `noreply@<domaine-vérifié>`)
+- `smtp_sender_name`: `Latch`
+- `smtp_max_frequency`: `5` (number) — secondes entre 2 envois au même email
+
+**Rate limits Auth** :
+- `rate_limit_email_sent`: `100` (par projet par heure)
+
+**Email template magic link** :
+- `mailer_subjects_magic_link`: `Ton code Latch`
+- `mailer_templates_magic_link_content`: HTML qui affiche `{{ .Token }}` en gros + lien `{{ .ConfirmationURL }}`
+
+**OTP length** : `mailer_otp_length: 6` (default est 8 — incompatible avec input 6 chiffres)
 
 ## Configuration Vercel
 
-À faire **une fois** par déploiement :
+Driveable via Vercel CLI (`npm install -g vercel`, `vercel login`).
 
-1. **Environment Variables** : ajouter les 5 vars listées plus haut (incluant `CRON_SECRET` que tu génères toi-même, ex `openssl rand -hex 32`)
-2. **Cron Jobs** : activé automatiquement par `vercel.json`. Vérifier dans le dashboard → Cron Jobs qu'il apparaît.
-3. **Custom domain** (optionnel) : Project Settings → Domains
+```bash
+vercel link --yes --project latch
+echo -n "<random-hex>" > tmp.txt
+cmd /c "vercel env add CRON_SECRET production < tmp.txt"  # sans newline !
+vercel --prod --yes  # déploie
+```
+
+⚠️ **`CRON_SECRET` ne doit PAS contenir de newline trailing** — sinon le deploy fail avec "contains leading or trailing whitespace, which is not allowed in HTTP header values". PowerShell pipe ajoute un newline → utiliser `cmd /c "... < file"` avec `[System.IO.File]::WriteAllText` qui n'ajoute pas de newline.
+
+**Cron Jobs** : activé automatiquement par `vercel.json`. Vérifier dans le dashboard → Cron Jobs qu'il apparaît avec schedule `0 8 * * *`.
+
+## Configuration Resend
+
+1. Créer un compte sur `resend.com` (l'email du compte = seul destinataire autorisé tant qu'aucun domaine n'est vérifié)
+2. API Keys → Create → permissions "Sending access" suffisent, mettre dans Supabase auth config
+3. **Avant beta externe** : Domains → Add domain → ajouter SPF/DKIM/return-path DNS → attendre vérif → changer `smtp_admin_email` en `noreply@<domain>`
 
 ## Setup local
 
@@ -329,33 +400,40 @@ Le SMTP par défaut de Supabase est limité à ~4 emails/h en free tier. Avant l
 git clone https://github.com/Flow-bear/latch.git
 cd latch
 npm install
-cp .env.local.example .env.local   # ou créer manuellement
-npm run dev                         # http://localhost:3000
+# Créer .env.local avec les 5 vars (cf. plus haut)
+npm run dev   # http://localhost:3000
 ```
 
-Pour tester le magic link en local : il faut que `NEXT_PUBLIC_SITE_URL` (ou `window.location.origin`) corresponde à une URL whitelistée dans Supabase. Le plus simple est de tester l'auth uniquement en prod.
+Pour tester le magic link en local : il faut que `localhost:3000/auth/callback` soit whitelisté dans Supabase → Auth → URL Configuration. Plus simple : tester l'auth uniquement en prod.
 
 ## Build & déploiement
 
 ```bash
-npm run build      # Vérifie types + génère sw.js
+npm run build      # vérifie types + génère sw.js
 npm run lint       # ESLint
-npm run eval       # Tourne les évals LLM (consomme des credits Anthropic)
+npm run eval       # tourne les évals LLM (consomme du crédit Anthropic)
+node scripts/e2e-browser.mjs  # full E2E (consomme un OTP admin)
 ```
 
-**Push to deploy** : tout push sur `main` déclenche un déploiement Vercel. Les artefacts PWA générés (`public/sw.js`, `public/workbox-*.js`) ne sont pas commités (gitignore).
+**Push to deploy** : tout push sur `main` déclenche un déploiement Vercel auto. `vercel --prod --yes` permet de forcer un deploy depuis le local. Les artefacts PWA générés (`public/sw.js`, `public/workbox-*.js`) ne sont pas commités.
 
 ## Troubleshooting
 
 | Symptôme | Cause probable | Fix |
 |---|---|---|
+| `email rate limit exceeded` au login | `rate_limit_email_sent` Supabase trop bas (default 2/h) | PATCH `/v1/projects/{ref}/config/auth` → 100 |
+| `Error sending magic link email` | Resend rejette le destinataire (domaine non vérifié) | Utiliser l'email du compte Resend, ou vérifier un domaine |
+| Token has expired or is invalid (sur OTP) | Code 8 chiffres reçu mais input 6 chiffres | Set `mailer_otp_length: 6` dans Supabase auth config |
+| `email rate limit exceeded` même avec 100/h | `smtp_max_frequency` (60s par défaut) bloque les retries rapides | Set à 5 secondes |
+| Deploy fail "CRON_SECRET contains whitespace" | Pipe PowerShell ajoute newline | Écrire en file UTF-8 sans BOM, `cmd /c < file` |
 | Magic link redirige vers localhost en prod | Site URL Supabase mal configurée | Auth → URL Configuration |
-| `auth/callback` retourne `?error=auth` | Code expiré ou déjà consommé | Redemander un nouveau magic link |
+| `auth/callback` retourne `?error=auth` | Code expiré ou déjà consommé, OU magic link `admin.generateLink` (implicit flow ≠ PKCE attendu) | Refaire un signInWithOtp depuis le formulaire |
 | Aucune tétée dans Supabase malgré logs locaux | User non-authed, ou RLS bloque | Vérifier `auth.uid()` correspond bien à `user_id` |
-| Cron `/api/checkin` retourne 401 | `CRON_SECRET` manquant ou différent | Vercel env vars + redeploy |
-| Cron retourne `{generated: 0}` toujours | Aucun profile ou heure locale ≠ 9 | Vérifier `profiles.timezone` cohérent |
+| Cron `/api/checkin` retourne 401 | `CRON_SECRET` manquant ou différent ou avec whitespace | Re-add env var sans newline + redeploy |
+| Cron retourne `{generated: 0}` toujours | Aucun profile, ou aucune feeding 24h | Vérifier que `profiles` contient l'user et que `feedings` a des lignes récentes |
+| Hobby plan : "cron expression would run more than once per day" | Vercel Hobby = 1 cron/jour max | Schedule en `0 8 * * *` (daily) |
 | iPhone : impossible d'installer la PWA | Pas dans Safari, ou pas iOS 16.4+ | Safari only |
-| Build fail sur `text-[#8B0000]` | Tailwind purge | Tailwind 3.4 supporte les arbitraires, pas un souci |
+| Browser sert vieille UI après deploy | Service worker cache | Hard refresh (Ctrl+Shift+R) ou DevTools → Service Workers → Unregister |
 | Notification push ne s'affiche pas | Pas implémenté V1 | Voir [Roadmap](#roadmap-restante) |
 
 ## Dette technique connue
@@ -364,12 +442,12 @@ npm run eval       # Tourne les évals LLM (consomme des credits Anthropic)
 - **Pas de page « Tout mon historique »**. Pour V1 personnel, le besoin n'est pas démontré.
 - **`auth/callback` ne gère que le flux PKCE (`code`)**. Si Supabase est configuré en mode legacy `token_hash`, ajouter une branche.
 - **Côté `'both'`** existe en SQL mais pas en UI. Question ouverte du PRD §10.
-- **Pas de timezone côté client** lors de la création du profil. Aujourd'hui hardcodée `Europe/Paris` (default SQL). À ajouter quand multi-user.
-- **Service worker `next-pwa` est en mode strict** (skipWaiting). Une mise à jour de l'app peut écraser un service worker en cours sans warning.
+- **Pas de timezone côté client** lors de la création du profil. Aujourd'hui hardcodée `Europe/Paris` (default SQL). À ajouter quand multi-user (et qu'on est sur Vercel Pro avec cron horaire).
+- **Service worker `next-pwa` est en mode strict** (skipWaiting). Une mise à jour peut écraser un SW en cours sans warning.
+- **Domaine Resend non vérifié**. Seul `alexandreschwerkolt@gmail.com` (email du compte) reçoit les magic links. Bloqueur pour beta externe.
+- **Cron daily, pas hourly**. Le filtre timezone existe en code mais désactivé. Restaurer après upgrade Pro.
 
 ## Roadmap restante
-
-Ce qui n'a pas été livré dans la run A→D et qu'il reste à faire pour le V1 complet :
 
 | Reste | Effort | Priorité |
 |---|---|---|
@@ -378,5 +456,6 @@ Ce qui n'a pas été livré dans la run A→D et qu'il reste à faire pour le V1
 | Export PDF récap pour pédiatre (`react-pdf`) | 1 jour | V1.5 |
 | Compléter le harness eval à 20 cas (10 ajoutés, 10 manquants) | ½ jour | Avant beta |
 | Logout + page settings | ½ jour | Avant beta |
-| Migration SMTP → Resend | ¼ jour | Avant beta |
+| Vérifier domaine dans Resend + changer sender | ½ jour | Avant beta externe |
+| Upgrade Vercel Pro + restaurer cron horaire timezone-aware | — (paid) | Avant beta multi-tz |
 | RGPD : DPA Supabase + chiffrement des `note` | 1 jour | Avant beta externe |

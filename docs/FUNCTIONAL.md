@@ -18,6 +18,7 @@
   - [Feature 2 — Check-in du matin](#feature-2--check-in-du-matin)
   - [Mode nuit auto](#mode-nuit-auto)
   - [Authentification](#authentification)
+- [Charte graphique](#charte-graphique)
 - [Hors scope V1](#hors-scope-v1)
 - [Disclaimer](#disclaimer)
 
@@ -62,30 +63,32 @@ Si une ligne de la validation perso est rouge à J14, on repense le produit avan
 
 1. L'utilisateur ouvre l'URL de l'app (depuis Vercel ou domaine custom).
 2. Redirigé vers `/login` (pas de session).
-3. Saisit son email → reçoit un magic link.
-4. Tap sur le lien dans l'email → revient sur `/auth/callback` → home authentifié.
+3. Saisit son email → reçoit un email Latch contenant **un code à 6 chiffres** et un lien magique.
+4. Deux options pour s'authentifier :
+   - **Code 6 chiffres** : tape les 6 chiffres directement dans l'app (plus rapide, recommandé sur mobile)
+   - **Magic link** : clique le lien dans l'email → revient sur `/auth/callback` → home authentifié
 5. (Sur iPhone Safari) il peut **Ajouter à l'écran d'accueil** pour avoir Latch comme une app installée.
 
 ### Logger une tétée
 
 À tout moment de la journée ou de la nuit :
 
-1. Ouvre l'app → écran d'accueil. Un seul gros bouton **Démarrer tétée**.
-2. Au-dessus du bouton, un texte indique le **côté suggéré** (gauche/droit), alterné automatiquement par rapport à la dernière tétée. Bouton « changer » pour forcer l'autre côté.
-3. Tape le bouton → écran timer plein écran. Affiche le côté + le chrono. Un seul gros bouton **Stop**.
+1. Ouvre l'app → écran d'accueil. Un **bouton circulaire central** « Démarrer » (~240 px de diamètre).
+2. Au-dessus du bouton, un texte sobre indique le **côté suggéré** (gauche/droit), alterné automatiquement par rapport à la dernière tétée. Lien « Changer de côté » pour forcer l'autre côté.
+3. Tape le bouton → écran timer plein écran. Affiche le côté + le chrono. Un seul **bouton circulaire Stop** (~140 px).
 4. Tape Stop → écran ressenti :
    - 3 emojis 😊 / 😐 / 😣 (optionnel)
-   - Champ texte libre (optionnel)
-   - Bouton **Sauvegarder** ou **Skip**
+   - Champ texte libre « Une note pour toi-même… » (optionnel)
+   - Boutons **Sauvegarder** ou **Skip**
 5. Retour à l'accueil. Le côté suggéré a alterné.
 
 La tétée est sauvegardée localement dans le navigateur (IndexedDB, Dexie). Quand l'app est connectée et l'utilisateur authentifié, elle est synchronisée vers Supabase en arrière-plan.
 
 ### Le matin
 
-Chaque jour à 9h heure locale, un cron côté serveur :
+Chaque jour vers **9-10h heure de Paris** (cron à 8h UTC), un job côté serveur :
 
-1. Récupère les tétées des dernières 24h et les moyennes des 7 derniers jours.
+1. Récupère les tétées des dernières 24h et les moyennes des 7 derniers jours pour chaque utilisateur.
 2. Appelle Claude (Sonnet 4.5) avec un prompt très contraint (voir `lib/prompts.ts`).
 3. Stocke un message court (2–3 phrases) dans la table `morning_checkins`.
 
@@ -101,19 +104,19 @@ Quand l'utilisateur ouvre l'app le matin, une **carte en haut de l'écran d'accu
 
 Specs :
 
-- Bouton de démarrage qui occupe ≥ 70 % de l'écran d'accueil
+- Bouton circulaire central (≥ 240 px) — visible et atteignable au pouce
 - Côté pré-sélectionné (alterne avec la dernière tétée)
-- Pendant la tétée : écran sombre, gros chrono, un seul bouton Stop
+- Pendant la tétée : fond sombre/clair selon l'heure, gros chrono, un seul bouton Stop circulaire
 - Champ ressenti optionnel après Stop, skipable
 - Fonctionne **offline** : la tétée est sauvegardée localement et synchronisée plus tard
 
 ### Feature 2 — Check-in du matin
 
-**Critère de réussite** : chaque matin à 9h, **une carte de 3 lignes max**, écrite comme un humain, qui contextualise la nuit.
+**Critère de réussite** : chaque matin, **une carte de 3 lignes max**, écrite comme un humain, qui contextualise la nuit.
 
 Specs :
 
-- Génération automatique côté serveur via cron Vercel
+- Génération automatique côté serveur via cron Vercel (1 firing/jour à 8h UTC ≈ 9-10h Paris)
 - Texte produit par Claude, ton chaleureux mais sobre, jamais alarmiste, jamais médical
 - Bouton **C'est normal ?** au pied de la carte (V2 — voir [TECHNICAL.md → Roadmap](./TECHNICAL.md#roadmap-restante))
 - Disclaimer permanent : *« Ces messages ne remplacent pas l'avis d'un professionnel de santé. »*
@@ -122,22 +125,57 @@ Le prompt et les règles de comportement attendu sont versionnés dans `lib/prom
 
 ### Mode nuit auto
 
-Entre **21h et 7h** (heure locale du device), l'app passe automatiquement en mode nuit :
+Entre **21h et 7h** (heure locale du device), l'app bascule automatiquement en mode nuit :
 
-- Fond noir partout
-- Texte rouge sombre `#8B0000` (pas de blanc qui éblouit à 3h du matin)
-- Boutons en outline rouge sombre, pas de remplissage clair
+- Fond **espresso chaud** `#1a1410` (pas noir pur — moins agressif sur l'œil dilaté à 3h du mat)
+- Texte **crème doux** `#d4b896` (pas blanc, pas rouge militaire — chaleureux et lisible)
+- Accent **caramel** `#c89878` pour les boutons d'action
+- Boutons circulaires en outline, pas de remplissage clair qui éblouit
 
 Aucune action utilisateur requise. Le hook `useNightMode` recalcule l'heure toutes les minutes et au retour de l'app au premier plan.
 
 ### Authentification
 
-- **Magic link uniquement** (pas de mot de passe en V1)
-- Email envoyé via le SMTP par défaut de Supabase (limité à ~4 emails/h en free tier — suffisant pour usage perso)
-- Session persistante via cookies HTTP-only (gérés par `@supabase/ssr`)
-- Le middleware redirige vers `/login` toute requête non authentifiée
+Deux flux disponibles dans le même email :
 
-Pas de logout V1 — c'est un compromis assumé pour la simplicité de l'usage perso. Pour se déconnecter : effacer les cookies du navigateur.
+- **Code OTP 6 chiffres** : copie-colle ou tape directement dans l'app, en 2 étapes (email → code). Recommandé sur mobile car évite le switch d'app.
+- **Magic link** : clique le lien dans l'email → revient sur `/auth/callback` → home authentifié.
+
+Email envoyé via **Resend** (3000 emails/mois free tier). Template personnalisé qui met en avant le code 6 chiffres en gros et le lien en dessous.
+
+Session persistante via cookies HTTP-only (gérés par `@supabase/ssr`). Le middleware redirige vers `/login` toute requête non authentifiée.
+
+Pas de logout dans l'UI V1 — assumé pour la simplicité de l'usage perso. Pour se déconnecter : effacer les cookies du navigateur.
+
+## Charte graphique
+
+Esthétique **intimiste, calme, feutrée** — pensée pour des yeux fatigués à 3h du matin et des soirées tranquilles avec bébé. Pas une app de productivité.
+
+**Mode jour** :
+- Fond crème `#f7f2e9` (linen, pas blanc clinique)
+- Texte brun chaud `#2c241e`
+- Accent terracotta `#b07050` (boutons, liens d'action)
+
+**Mode nuit (21h-7h)** :
+- Fond espresso `#1a1410`
+- Texte crème doux `#d4b896`
+- Accent caramel `#c89878`
+
+**Typographie** :
+- Geist Sans (chargée localement) pour tout le texte
+- Geist Mono pour les chiffres du timer (alignement tabulaire)
+- Wordmark Latch en `tracking-[0.32em]` uppercase — éditorial, pas tech-y
+- Generous letter-spacing sur les libellés UI (`COTÉ · DROIT`, `BONJOUR`, `DIMANCHE 3 MAI`) pour l'élégance
+
+**Formes** :
+- Bouton principal de démarrage : **cercle 240 px**, outline 2 px, texte centré
+- Bouton Stop : cercle 140 px, même style
+- Cards (check-in matin, ressenti) : `rounded-3xl`
+- CTAs secondaires : `rounded-full`
+- Inputs : `rounded-3xl`
+
+**Animations** :
+- Aucune. Tout en `transition-colors` discret. Pas de pulse, pas de spinner décoratif.
 
 ## Hors scope V1
 
@@ -153,7 +191,7 @@ Liste explicitement bannie pour résister au scope creep :
 - Gamification, badges, streaks
 - Onboarding multi-étapes
 - Compte multi-utilisateurs / partage temps réel co-parent
-- Mot de passe (magic link uniquement)
+- Mot de passe (magic link / OTP uniquement)
 - App native iOS / Android (PWA pour MVP)
 - Intégration boutons volume physiques
 - Push notifications (reportées V2 — voir [TECHNICAL.md → Roadmap](./TECHNICAL.md#roadmap-restante))
