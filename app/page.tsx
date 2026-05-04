@@ -130,6 +130,25 @@ export default function Home() {
     return (
       <main className={`min-h-[100dvh] flex flex-col ${c.bg} ${c.text}`}>
         <header className="px-6 pt-6 pb-2 flex items-center justify-between">
+          <Link
+            href="/historique"
+            aria-label="Historique"
+            className={`${c.muted} active:opacity-60`}
+          >
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+            >
+              <line x1="5" y1="7" x2="19" y2="7" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+              <line x1="5" y1="17" x2="19" y2="17" />
+            </svg>
+          </Link>
           <h1
             className={`text-base font-light tracking-[0.32em] uppercase ${c.soft}`}
           >

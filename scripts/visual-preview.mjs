@@ -168,10 +168,66 @@ async function clearOnboardingProgress() {
     .eq('user_id', TEST_USER_ID)
 }
 
+// ─── Feedings seeding for /historique shoots ─────────────────────────────
+// Use a recognizable note prefix so we can clean up after.
+const SEED_NOTE_PREFIX = '__preview__'
+
+// Offset in minutes back from `now`. Always strictly in the past so the modal
+// validation ("L'heure de début ne peut pas être dans le futur") never fires
+// in screenshots, regardless of when the script runs.
+function makeSeed(minutesAgo, durationMin, side, mood = null, note = '') {
+  const start = new Date(Date.now() - minutesAgo * 60_000)
+  const end = new Date(start.getTime() + durationMin * 60_000)
+  return {
+    user_id: TEST_USER_ID,
+    client_id: crypto.randomUUID(),
+    started_at: start.toISOString(),
+    ended_at: end.toISOString(),
+    side,
+    mood_emoji: mood,
+    note: `${SEED_NOTE_PREFIX} ${note}`.trim(),
+  }
+}
+
+async function seedFeedings() {
+  await clearSeededFeedings()
+  const M = 60 // minutes per hour
+  const D = 24 * M // minutes per day
+  const rows = [
+    // today (relative — strictly in the past)
+    makeSeed(2 * M, 14, 'right', '😊'),
+    makeSeed(5 * M, 11, 'left'),
+    makeSeed(9 * M, 17, 'right', '😐'),
+    // yesterday
+    makeSeed(D + 2 * M, 14, 'right'),
+    makeSeed(D + 6 * M, 16, 'left'),
+    makeSeed(D + 11 * M, 9, 'both', '😣', 'douleur sein gauche'),
+    makeSeed(D + 15 * M, 12, 'right'),
+    makeSeed(D + 18 * M, 13, 'left'),
+    // 2 days ago
+    makeSeed(2 * D + 4 * M, 15, 'right'),
+    makeSeed(2 * D + 12 * M, 13, 'left'),
+    makeSeed(2 * D + 16 * M, 11, 'right'),
+  ]
+  await admin.from('feedings').insert(rows)
+}
+
+async function clearSeededFeedings() {
+  await admin
+    .from('feedings')
+    .delete()
+    .eq('user_id', TEST_USER_ID)
+    .like('note', `${SEED_NOTE_PREFIX}%`)
+}
+
 /**
  * @param {string} label  filename suffix
  * @param {number} hour   forced hour (drives day/night mode via Date.getHours)
- * @param {{checkin?: 'open' | 'collapsed' | 'none' | 'long', path?: string}} opts
+ * @param {{
+ *   checkin?: 'open' | 'collapsed' | 'none' | 'long',
+ *   path?: string,
+ *   after?: (page: import('playwright').Page) => Promise<void>,
+ * }} opts
  */
 async function shoot(label, hour, opts = {}) {
   const context = await browser.newContext({
@@ -251,6 +307,13 @@ async function shoot(label, hour, opts = {}) {
   const target = `${BASE}${opts.path ?? '/'}`
   const resp = await page.goto(target, { waitUntil: 'networkidle', timeout: 15000 })
   await page.waitForTimeout(1200)
+  if (opts.after) {
+    try {
+      await opts.after(page)
+    } catch (e) {
+      console.log(`  after() failed for ${label}: ${e.message}`)
+    }
+  }
   const finalUrl = page.url()
   const bodyText = (await page.locator('body').textContent())?.slice(0, 120) ?? ''
   await page.screenshot({ path: `${OUT}/preview-${label}.png`, fullPage: true })
@@ -312,6 +375,38 @@ try {
   // Settings
   await shoot('day-settings', 14, { path: '/settings' })
   await shoot('night-settings', 23, { path: '/settings' })
+
+  // ─── Historique (seed feedings, screenshot list + modals, cleanup) ─────
+  console.log('→ seeding feedings for /historique')
+  await seedFeedings()
+
+  await shoot('day-historique-list', 14, { path: '/historique' })
+  await shoot('night-historique-list', 23, { path: '/historique' })
+
+  // Modal: edit (click first feeding row)
+  await shoot('day-historique-modal-edit', 14, {
+    path: '/historique',
+    after: async (page) => {
+      await page.locator('button[aria-label="Ajouter une tétée"]').waitFor({ timeout: 3000 })
+      const firstRow = page.locator('section button').first()
+      await firstRow.click()
+      await page.waitForTimeout(400)
+    },
+  })
+
+  // Modal: add (click FAB)
+  await shoot('day-historique-modal-add', 14, {
+    path: '/historique',
+    after: async (page) => {
+      await page.locator('button[aria-label="Ajouter une tétée"]').click()
+      await page.waitForTimeout(400)
+    },
+  })
+
+  // Note: skipping the "empty state" shot because the real test user has
+  // genuine feedings the script must not delete. Empty-state UI is trivial
+  // (a single centered line) and visually verifiable on the device.
+  // Seeded feedings stay in the DB so the Vercel branch preview shows data.
 
   // Login page (logged out — no cookies)
   for (const [label, hour] of [['day-login', 14], ['night-login', 23]]) {
