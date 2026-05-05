@@ -52,6 +52,11 @@ latch/
 │   ├── auth/
 │   │   └── callback/route.ts       # Échange magic-link code → session
 │   ├── login/page.tsx              # Email + OTP code 2-step (ou magic link)
+│   ├── onboarding/page.tsx         # Wizard 7 étapes, reprise après abandon
+│   ├── settings/page.tsx           # Édition du profil + reset onboarding
+│   ├── historique/
+│   │   ├── page.tsx                # Liste antéchrono, groupage par jour, FAB
+│   │   └── FeedingModal.tsx        # Bottom sheet édition / ajout
 │   ├── layout.tsx                  # Metadata + manifest + theme color
 │   ├── page.tsx                    # State machine idle → active → done
 │   └── globals.css
@@ -59,28 +64,34 @@ latch/
 │   ├── supabase/
 │   │   ├── client.ts               # createBrowserClient
 │   │   ├── server.ts               # createServerClient (Server Components)
-│   │   └── middleware.ts           # Refresh session + auth gate
+│   │   └── middleware.ts           # Refresh session + auth + onboarding gate
 │   ├── hooks/
 │   │   └── useNightMode.ts         # Détection 21h-7h
+│   ├── utils/
+│   │   └── age.ts                  # formatAge / formatDuration FR
 │   ├── db.ts                       # Dexie schema (table feedings, v2)
 │   ├── sync.ts                     # IndexedDB → Supabase upsert
-│   ├── prompts.ts                  # Prompts 1 et 2 (PRD §5)
+│   ├── prompts.ts                  # buildMorningCheckinSystem(profile) + ASK
+│   ├── profile.ts                  # Types Profile + getProfile + label maps
+│   ├── palette.ts                  # Palette day/night partagée (3 pages)
 │   └── feeding-stats.ts            # Formatters pour les payloads LLM
 ├── public/
 │   ├── manifest.json               # PWA, theme #1a1410
 │   ├── icon-192.png / icon-512.png # Placeholders L blanc / fond noir
 ├── scripts/
-│   ├── apply-schema.mjs            # Apply supabase/schema.sql via Mgmt API
+│   ├── apply-schema.mjs            # Apply schema/migration via Mgmt API
 │   ├── evals.ts                    # Harness eval LLM (10 fixtures)
 │   ├── e2e-login.mjs               # Test UI login (Playwright)
 │   ├── e2e-feeding.mjs             # Test data path REST (auth, RLS, sync)
 │   ├── e2e-browser.mjs             # Test UI authentifié end-to-end
-│   └── visual-preview.mjs          # Screenshots day+night avant deploy
+│   └── visual-preview.mjs          # Screenshots day+night, drive DB state
 ├── supabase/
-│   └── schema.sql                  # Tables + RLS + trigger profile auto
+│   ├── schema.sql                  # Snapshot complet (tables + RLS + triggers)
+│   └── migrations/                 # Migrations idempotentes (alter table…)
 ├── docs/
 │   ├── FUNCTIONAL.md
 │   └── TECHNICAL.md                # ← ce fichier
+├── CLAUDE.md                       # Workflow Claude (visual gate + docs)
 ├── middleware.ts                   # Top-level Next.js middleware
 ├── next.config.mjs                 # next-pwa wrapper
 ├── vercel.json                     # Cron daily 8 UTC
@@ -134,16 +145,39 @@ latch/
 
 ## Schéma de données
 
-Source : `supabase/schema.sql`. Quatre tables, toutes avec RLS strict.
+Source : `supabase/schema.sql` (snapshot) + `supabase/migrations/*.sql` (migrations idempotentes appliquées via `apply-schema.mjs`). Cinq tables, toutes avec RLS strict.
 
 ```sql
 profiles (
   id uuid pk -> auth.users(id) on delete cascade,
   baby_name text, baby_birth_date date,
   timezone text default 'Europe/Paris',
-  created_at timestamptz
+  -- Champs collectés à l'onboarding (nullables sur la table car le trigger
+  -- handle_new_user crée une ligne vide ; le wizard les remplit puis pose
+  -- onboarded_at, qui sert de gate pour le middleware)
+  is_first_child boolean,
+  feeding_type text check (in 'exclusive'|'mixed'),
+  breastfeeding_start_date date,
+  current_rhythm text check (in
+    'very_close'|'regular'|'spaced'|'very_variable'|'just_started'),
+  has_professional_support boolean default false,
+  general_feeling text check (length <= 500),
+  current_concern text check (length <= 500),
+  onboarded_at timestamptz,
+  created_at timestamptz, updated_at timestamptz
 )
    trigger on_auth_user_created → insert profile auto
+   trigger profiles_touch_updated_at → bump updated_at sur UPDATE
+   index profiles_onboarded_idx (id) WHERE onboarded_at IS NOT NULL
+     ← lookup partial pour le middleware (PK + filtre indexé)
+
+user_onboarding_progress (
+  user_id uuid pk -> auth.users(id) on delete cascade,
+  current_step smallint default 1,
+  partial_data jsonb default '{}'::jsonb,
+  updated_at timestamptz
+)
+   ← table éphémère : créée à la 1ère étape du wizard, supprimée au "Terminer"
 
 feedings (
   id pk uuid default gen_random_uuid(),
@@ -170,19 +204,28 @@ ai_questions (
 
 **Politique RLS** :
 
-- `profiles`, `feedings`, `ai_questions` : SELECT/INSERT/UPDATE/DELETE seulement sur `user_id = auth.uid()` (`profiles.id` pour profiles)
+- `profiles`, `feedings`, `ai_questions`, `user_onboarding_progress` : SELECT/INSERT/UPDATE/DELETE seulement sur `user_id = auth.uid()` (`profiles.id` pour profiles)
 - `morning_checkins` : SELECT et UPDATE pour le user (read_at). **Pas de policy INSERT** — seul le cron (service_role) écrit.
 
 ## Routes
 
 | Path | Type | Auth | Rôle |
 |---|---|---|---|
-| `/` | client page | requise | State machine idle/active/done + carte check-in |
+| `/` | client page | requise + onboardé | State machine idle/active/done + carte check-in collapsable + GAUCHE/DROIT picker. Header : icône liste (← /historique), wordmark LATCH, icône engrenage (← /settings) |
+| `/onboarding` | client page | requise + non-onboardé | Wizard 7 étapes, reprise via `user_onboarding_progress` |
+| `/settings` | client page | requise + onboardé | Édition profil, bouton « Recommencer l'onboarding » |
+| `/historique` | client page | requise + onboardé | Liste antéchrono groupée par jour, bottom sheet édition/ajout, FAB |
 | `/login` | client page | publique | Email → OTP code 6 chiffres OU magic link |
 | `/auth/callback` | route handler | publique | Échange `?code=` (PKCE) → session, redirige vers `/` |
-| `/api/checkin` | route handler | header `Bearer $CRON_SECRET` | Cron quotidien, génère check-in pour tous les profiles |
+| `/api/checkin` | route handler | header `Bearer $CRON_SECRET` | Cron quotidien, génère check-in pour les profiles **onboardés** |
 
-`middleware.ts` redirige toute requête non-authentifiée vers `/login`, sauf `/login`, `/auth/*`, `/api/*` (les API gèrent leur propre auth), et les assets PWA.
+`middleware.ts` (via `lib/supabase/middleware.ts`) :
+1. Récupère la session ; si absente et chemin non public (`/login`, `/auth/*`) → redirect `/login`.
+2. Si session valide : SELECT `onboarded_at` sur `profiles` (PK lookup, partial index).
+3. Si non-onboardé et chemin ≠ `/onboarding` ni public → redirect `/onboarding`.
+4. Si onboardé et chemin = `/onboarding` → redirect `/` (modification = passer par `/settings`).
+
+Le coût additionnel est **1 query indexée par requête protégée**, latence négligeable (PK lookup partiel).
 
 ## Auth flow
 
@@ -253,15 +296,24 @@ Limitations connues :
 
 Fichier : `lib/prompts.ts`. Versionnés dans le repo, testés par `scripts/evals.ts`.
 
-| Constante | Quand | Modèle | Max tokens |
+| Export | Quand | Modèle | Max tokens |
 |---|---|---|---|
-| `MORNING_CHECKIN_SYSTEM` | Cron quotidien (8h UTC) | claude-sonnet-4-5 | 256 |
-| `ASK_QUESTION_SYSTEM` | Action « C'est normal ? » (V2) | claude-sonnet-4-5 | 512 |
+| `buildMorningCheckinSystem(profile)` | Cron quotidien (8h UTC) | claude-sonnet-4-5 | 200 |
+| `ASK_QUESTION_SYSTEM` (constante) | Action « C'est normal ? » (V2) | claude-sonnet-4-5 | 512 |
 
-Données envoyées au modèle (formatters dans `lib/feeding-stats.ts`) :
+`buildMorningCheckinSystem` est une **fonction**, pas une constante : elle prend un `Profile` en argument et compose un prompt système qui :
+
+1. Décrit l'utilisateur en français : prénom du bébé (ou "son bébé"), date de naissance + âge formaté (`formatAge`), premier enfant ou non, type d'allaitement, durée d'allaitement, rythme déclaré, suivi pro, préoccupation et ressenti enregistrés à l'inscription.
+2. Liste des règles d'**adaptation du ton** conditionnelles : plus rassurant si premier enfant, plus direct si suivi pro, oriente vers ressources fiables (PMI, La Leche League, IBCLC) si pas de suivi, focus mise en route si bébé < 1 mois, mention diversification/retour au travail si > 4 mois, prend en compte la préoccupation déclarée.
+3. Append des **consignes de longueur strictes** : MAX 50 mots, 2-3 phrases courtes, une observation + une cause + une action SI ET SEULEMENT SI nécessaire. Inclut un exemple **négatif** (un message verbose qui a réellement cassé le layout en testing) pour ancrer le bon réflexe.
+4. Append les consignes de forme historiques (ton, pas de jargon, pas d'alarme).
+
+Données utilisateur envoyées au modèle (formatters dans `lib/feeding-stats.ts`) :
 
 - **Check-in** : tétées des dernières 24h (heure, côté, durée, mood, note) + résumé 7 jours (moy. tétées/jour, durée moyenne, ratio gauche/droit)
 - **Ask** : question utilisateur + historique 30 jours
+
+Le cron skip les profiles non-onboardés (filtre `.not('onboarded_at', 'is', null)` au SELECT).
 
 ## Cron du check-in matin
 
@@ -446,14 +498,18 @@ node scripts/e2e-browser.mjs  # full E2E (consomme un OTP admin)
 | iPhone : impossible d'installer la PWA | Pas dans Safari, ou pas iOS 16.4+ | Safari only |
 | Browser sert vieille UI après deploy | Service worker cache | Hard refresh (Ctrl+Shift+R) ou DevTools → Service Workers → Unregister |
 | Notification push ne s'affiche pas | Pas implémenté V1 | Voir [Roadmap](#roadmap-restante) |
+| Sur iOS Safari, contenu déborde sous la toolbar bien que `min-h-screen` | `100vh` se calcule sur le viewport **maximum** (toolbars masquées), pas le visible | Utiliser `min-h-[100dvh]` (dynamic viewport height). Pour les caps de hauteur, préférer `max-h-44` (px fixes) à `max-h-[Xvh]` |
+| Modal datetime affiche heure incorrecte ou validation "futur" en preview | Date.prototype.getHours est monkey-patché par visual-preview pour forcer day/night ; isoToInput utilise getHours | Le code utilise déjà `Intl.DateTimeFormat.formatToParts` (résilient au patch). Si ré-apparaît : vérifier que les helpers de date ne dépendent pas de Date.prototype |
+| Visual-preview screenshot vide / page non hydratée | Zombie `next start` sur 4101 d'un run précédent qui sert un build périmé | Le script refuse de démarrer si 4101 est occupé, et utilise `taskkill /F /T` pour tuer l'arbre proprement. Si nécessaire : `Get-NetTCPConnection -LocalPort 4101` puis `Stop-Process` |
 
 ## Dette technique connue
 
 - **Pas de logout** dans l'UI. À ajouter quand un second user existe.
-- **Pas de page « Tout mon historique »**. Pour V1 personnel, le besoin n'est pas démontré.
 - **`auth/callback` ne gère que le flux PKCE (`code`)**. Si Supabase est configuré en mode legacy `token_hash`, ajouter une branche.
-- **Côté `'both'`** existe en SQL mais pas en UI. Question ouverte du PRD §10.
+- **Côté `'both'`** : géré en SQL et dans `/historique` (modal d'édition), mais pas exposé sur le bouton Démarrer de l'accueil (logger une tétée "les deux" passe forcément par /historique en édition manuelle).
 - **Pas de timezone côté client** lors de la création du profil. Aujourd'hui hardcodée `Europe/Paris` (default SQL). À ajouter quand multi-user (et qu'on est sur Vercel Pro avec cron horaire).
+- **Mutations offline non queueées** : sur `/historique`, l'édition et la suppression sont désactivées hors-ligne (lecture seule du cache Dexie). Pas de queue de mutations à rejouer au retour. Acceptable V1 vu l'usage personnel ; à reconsidérer si beta externe rapporte de la friction.
+- **Cache Dexie incomplet** : seules les tétées non-syncées et les tétées loggées via le bouton Démarrer sont en local. Les tétées créées via `/historique` (ajout manuel) ne passent pas par Dexie → en offline, elles n'apparaîtront pas dans la liste tant que la session ne les a pas fetché.
 - **Service worker `next-pwa` est en mode strict** (skipWaiting). Une mise à jour peut écraser un SW en cours sans warning.
 - **Domaine Resend non vérifié**. Seul `alexandreschwerkolt@gmail.com` (email du compte) reçoit les magic links. Bloqueur pour beta externe.
 - **Cron daily, pas hourly**. Le filtre timezone existe en code mais désactivé. Restaurer après upgrade Pro.

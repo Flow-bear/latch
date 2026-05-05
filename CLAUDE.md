@@ -25,6 +25,18 @@
 - Modification du schéma Supabase, migration de DB, opérations sur la DB de prod.
 - Suppression de fichiers committés ou de larges portions de code sans rapport avec la tâche.
 
+## Documentation à jour à chaque déploiement
+
+**Tout push sur `main` (= déploiement Vercel prod) doit inclure les mises à jour correspondantes** dans `docs/TECHNICAL.md` ET `docs/FUNCTIONAL.md`. Soit dans le même commit que la feature, soit dans un commit doc immédiatement après — jamais lagger sur plusieurs déploiements.
+
+Checklist avant push prod :
+- Nouvelles routes / pages → `FUNCTIONAL.md` (parcours, features) + `TECHNICAL.md` (Routes, Arborescence)
+- Nouvelles tables / colonnes / RLS → `TECHNICAL.md` § Schéma de données
+- Nouvel env var ou config Supabase / Vercel / Resend → `TECHNICAL.md` § correspondante
+- Modification du prompt LLM ou du flow check-in → `FUNCTIONAL.md` § Feature 2 + `TECHNICAL.md` § Prompts
+- Nouvelle gotcha / piège connu → `TECHNICAL.md` § Troubleshooting
+- Élargissement ou réduction du scope → `FUNCTIONAL.md` § Hors scope V1
+
 ## Discipline produit
 
 Latch est un MVP solo, scope strict, propriétaire = utilisatrice actuelle (allaitement en cours). Les features explicitement out-of-scope dans `docs/FUNCTIONAL.md` ne reviennent pas par la petite porte. En cas de doute sur un changement qui élargit la portée, demander avant d'implémenter.
